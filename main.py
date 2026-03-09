@@ -559,7 +559,8 @@ class Button:
         if event.type == pygame.MOUSEMOTION:
             self.is_hovered = self.rect.collidepoint(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if self.is_hovered and event.button == 1 and self.callback:
+            # 用 rect 直接判定点击，避免未经过 hover 时点击无反应（如信件界“发送信号”）
+            if event.button == 1 and self.rect.collidepoint(event.pos) and self.callback:
                 self.callback()
 
 class Slider:
@@ -1661,11 +1662,14 @@ def main():
         if not lvl:
             return
 
-        # Special Logic for Tutorial
+        # 第一关教学：不预设调制，让玩家按教程步骤点击 BPSK，避免该步被直接跳过；编码固定为 None（第一关无编码选项）
         if lvl.get('id') == 1:
             g_tutorial.start()
             current_mod = None
-            current_code = None
+            current_code = "None"
+        else:
+            current_mod = lvl['available_mods'][0] if lvl.get('available_mods') else "BPSK"
+            current_code = lvl.get('available_codes', ["None"])[0]
         
         try:
             lvl_id = int(lvl.get('id', 1))
@@ -2019,9 +2023,6 @@ def main():
         if current_polar_method != method:
             current_polar_method = method
             sim_result = None
-
-            sim_result = None
-            is_animating = False
 
     def cb_run_sim():
         nonlocal is_animating, anim_progress, sim_result, energy, show_analysis, hidden_attempts
@@ -2776,99 +2777,89 @@ def main():
                     current_state = STATE_START_SCREEN
 
             elif current_state == STATE_PLAYING:
-                # Common UI Events in Playing State
-                btn_restart_level.handle_event(e)
-                
-                # DEBUG CHEAT: Press F6 to jump to Level 9
+                # DEBUG CHEAT: F6 跳关
                 if e.type == pygame.KEYDOWN and e.key == pygame.K_F6:
-                     print("DEBUG: Jumping to Level 9")
-                     for idx, lvl in enumerate(level_mgr.levels):
-                        if lvl.get('id') == 10: # Target Level 8
+                    for idx, lvl in enumerate(level_mgr.levels):
+                        if lvl.get('id') == 10:
                             level_mgr.current_level_idx = idx
-                            # Reset State
                             path_indices = []
                             sim_result = None
                             level_complete = False
                             is_animating = False
-                            # Unlock techs if jumping forward
-                            has_laser_tech = True 
-                            energy = 9999 # Infinite Energy
-                            
-                            # Reload
+                            has_laser_tech = True
+                            energy = 9999
                             level = level_mgr.get_current_level()
                             if level:
                                 current_mod = level['available_mods'][0]
                                 current_code = level.get('available_codes', ["None"])[0]
                             current_state = STATE_BRIEFING
                             break
-
-                if level.get('id') == 'HIDDEN_SAT_ARRAY':
-                    btn_exit_hidden.handle_event(e)
-                
-                if show_analysis:
-                    btn_close_report.handle_event(e)
-                elif not is_animating:
-                    # 如果关卡未完成，或者在隐藏关，才允许点击发射
-                    if not level_complete or level.get('id') == 'HIDDEN_SAT_ARRAY':
-                        btn_tx.handle_event(e)
-                    
-                    btn_knowledge.handle_event(e)
-                    if sim_result:
-                        btn_analysis.handle_event(e)
-
-                    
-                    if e.type == pygame.MOUSEBUTTONDOWN:
-                        mx, my = e.pos
-                        
-                        # Node Selection Logic
-                        if 'nodes' in level:
-                            if e.button == 3: # Right click to clear
+                # 第一关教学：误码率步骤中“点击任意处以继续”
+                if e.type == pygame.MOUSEBUTTONDOWN and g_tutorial.active and not is_animating and level:
+                    tsteps = level.get('tutorial_steps') or []
+                    if tsteps and g_tutorial.step < len(tsteps) and tsteps[g_tutorial.step].get('highlight') == 'ber_display' and sim_result is not None:
+                        g_tutorial.completed = True
+                        continue
+                # 优先处理地图区域内的节点点击（建立链路），避免被按钮逻辑覆盖
+                map_click_consumed = False
+                if e.type == pygame.MOUSEBUTTONDOWN and not is_animating and level:
+                    mx, my = e.pos
+                    if mx < MAP_WIDTH and 'nodes' in level:
+                        if e.button == 3:
+                            path_indices = []
+                            map_click_consumed = True
+                        elif e.button == 1:
+                            if ghost_cube_visible and ghost_cube_rect.collidepoint((mx, my)):
+                                hidden_lvl = generate_hidden_satellite_level()
+                                global g_original_level
+                                g_original_level = level_mgr.levels[level_mgr.current_level_idx]
+                                level_mgr.levels[level_mgr.current_level_idx] = hidden_lvl
+                                current_state = STATE_BRIEFING
                                 path_indices = []
-                            elif e.button == 1:
-                                # Check Ghost Cube Click
-                                if ghost_cube_visible and ghost_cube_rect.collidepoint((mx, my)):
-                                    # Trigger Hidden Level
-                                    hidden_lvl = generate_hidden_satellite_level()
-                                    
-                                    # 保存原始关卡，支持点击 EXIT 退出
-                                    global g_original_level
-                                    g_original_level = level_mgr.levels[level_mgr.current_level_idx]
-                                    
-                                    level_mgr.levels[level_mgr.current_level_idx] = hidden_lvl
-                                    current_state = STATE_BRIEFING
-                                    path_indices = []
-                                    is_animating = False
-                                    level_complete = False
-                                    sim_result = None
-                                    continue # Skip other clicks
-
+                                is_animating = False
+                                level_complete = False
+                                sim_result = None
+                                map_click_consumed = True
+                            else:
+                                NODE_HIT_RADIUS = 28  # 节点可点击半径，略大于绘制半径便于操作
                                 for idx, node in enumerate(level['nodes']):
                                     dist = np.hypot(mx - node['pos'][0], my - node['pos'][1])
-                                    if dist < 20: # Hit radius
-                                        # Path logic
+                                    if dist < NODE_HIT_RADIUS:
                                         if not path_indices:
-                                            if node['type'] == 'src': path_indices.append(idx)
-                                        else:
-                                            # Allow connecting to next node
-                                            # Prevent immediate loop back to same node
-                                            if idx != path_indices[-1]: 
+                                            if node['type'] == 'src':
                                                 path_indices.append(idx)
+                                                map_click_consumed = True
+                                        else:
+                                            if idx != path_indices[-1]:
+                                                path_indices.append(idx)
+                                                map_click_consumed = True
                                         break
 
-                        for rect, m in ui_mod_rects: 
-                            if rect.collidepoint((mx, my)): set_mod(m)
-                        for rect, c in ui_code_rects:
-                            if rect.collidepoint((mx, my)): set_code(c)
-                        # Decoder selection
-                        for rect, d_method in ui_decoder_rects:
-                             if rect.collidepoint((mx, my)): set_polar_method(d_method)
-                        # Tech selection
-                        for rect, tech in ui_tech_rects:
-                             if rect.collidepoint((mx, my)):
-                                 if tech == "Laser": toggle_laser()
-                
-                # 确保隐藏关内只能通过 EXIT 退出，屏蔽 NEXT MISSION 按钮交互
-                if level_complete and level.get('id') != 'HIDDEN_SAT_ARRAY':
+                if not map_click_consumed:
+                    btn_restart_level.handle_event(e)
+                    if level and level.get('id') == 'HIDDEN_SAT_ARRAY':
+                        btn_exit_hidden.handle_event(e)
+                    if show_analysis:
+                        btn_close_report.handle_event(e)
+                    elif not is_animating:
+                        if not level_complete or (level and level.get('id') == 'HIDDEN_SAT_ARRAY'):
+                            btn_tx.handle_event(e)
+                        btn_knowledge.handle_event(e)
+                        if sim_result:
+                            btn_analysis.handle_event(e)
+                        if e.type == pygame.MOUSEBUTTONDOWN:
+                            mx, my = e.pos
+                            for rect, m in ui_mod_rects:
+                                if rect.collidepoint((mx, my)): set_mod(m)
+                            for rect, c in ui_code_rects:
+                                if rect.collidepoint((mx, my)): set_code(c)
+                            for rect, d_method in ui_decoder_rects:
+                                if rect.collidepoint((mx, my)): set_polar_method(d_method)
+                            for rect, tech in ui_tech_rects:
+                                if rect.collidepoint((mx, my)) and tech == "Laser":
+                                    toggle_laser()
+
+                if level_complete and level and level.get('id') != 'HIDDEN_SAT_ARRAY':
                     btn_next.handle_event(e)
 
         # Draw
@@ -3469,6 +3460,13 @@ def main():
                     elif highlight == 'ber_display':
                         target_rect = rect_gauge
                     g_tutorial.draw(screen, target_rect, text)
+                    # 误码率步骤且已有结果时，显示“点击任意处以继续”
+                    if highlight == 'ber_display' and sim_result is not None and not is_animating:
+                        hint_surf = label_font.render("点击任意处以继续", True, (180, 220, 255))
+                        hint_rect = hint_surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 50))
+                        pygame.draw.rect(screen, (30, 40, 55), hint_rect.inflate(24, 12), border_radius=6)
+                        pygame.draw.rect(screen, (80, 100, 120), hint_rect.inflate(24, 12), 1, border_radius=6)
+                        screen.blit(hint_surf, hint_rect)
                     # 根据当前步骤检查是否可进入下一步
                     if highlight == 'path' and len(path_indices) >= 2:
                         g_tutorial.next()
