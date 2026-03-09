@@ -2,20 +2,49 @@
 class LevelManager:
     def __init__(self):
         self.levels = [
-            # --- Phase I: 尘埃与回响 (Dust & Echoes) ---
+            # --- 阶段一新增：第一次握手（简化入门关）---
             {
                 "id": 1,
-                "title": "废土重启",
+                "title": "第一次握手",
                 "phase": "第一章: 尘埃与回响",
-                "story_intro": "2050年，“大静默”事件席卷全球，高能电磁脉冲摧毁了旧时代的每一块芯片。\n即便过了三年，地表的高频背景辐射依然如迷雾般浓厚。\n作为【地球联合 (UEG)】幸存的首席通信工程师，你站在 Base Zero 的控制台前。那盏红色的“离线”指示灯已经闪烁了一千多个日夜。\n今天，备用天线阵列终于充能完毕。你的首要任务是向近地轨道上虽已停摆但结构完好的 Sat-1 卫星发送唤醒指令，这是重建行星神经网络的第一步。",
-                "mission_info": "目标：向 Sat-1 发送初始化指令 \"EARTH_INIT\"\n挑战：设备老化严重，发射功率受限，且不可靠。\n建议：环境噪声已被屏蔽，利用最基础的 BPSK 调制（虽然慢，但最稳健）来确保握手成功。",
-                "mission_text": "任务：发送初始化指令至 Sat-1。\n当前信道状况：纯净。\n指令要求：绝对稳定。\n建议策略：启用重复码 (Repetition Code) 作为双重保险。",
+                "story_intro": "2050年，“大静默”事件席卷全球。\n作为【地球联合 (UEG)】幸存的首席通信工程师，你站在 Base Zero 的控制台前。\n今天，备用天线阵列终于充能完毕。先完成一次最简单的握手：向 Sat-1 发送唤醒指令。",
+                "mission_info": "目标：向 Sat-1 发送初始化指令 \"EARTH_INIT\"\n环境：信道状况良好，信噪比已提高。\n操作：选择 BPSK 调制，点击发送即可。",
+                "mission_text": "任务：发送初始化指令至 Sat-1。\n当前信道状况：良好。\n只需选择 BPSK 并发送。",
                 "message": "EARTH_INIT",
                 "message_desc": "[系统初始化]",
-                "snr_db": 5, 
+                "snr_db": 10,
                 "available_mods": ["BPSK"],
-                "available_codes": ["None", "Repetition(3,1)"], 
-                "target_ber": 0.01, 
+                "available_codes": ["None"],
+                "target_ber": 0.05,
+                "star_thresholds": {"one_star": 0.05, "two_star": 0.02, "three_star": 0.01},
+                "tutorial_steps": [
+                    {"highlight": "path", "text": "点击绿色节点，再点击红色节点以建立通信链路"},
+                    {"highlight": "modulation_panel", "text": "点击选择 BPSK"},
+                    {"highlight": "send_button", "text": "点击发送"},
+                    {"highlight": "ber_display", "text": "误码率 < 目标即成功"}
+                ],
+                "nodes": [
+                    {"name": "Base Zero", "pos": (150, 600), "origin_pos": (150, 600), "type": "src"},
+                    {"name": "Sat-1", "pos": (600, 500), "origin_pos": (600, 500), "type": "dest"}
+                ],
+                "snr_matrix": [[0, 10], [10, 0]],
+                "reward": "解锁下一任务：加上保险"
+            },
+            # --- 原关卡1 → 关卡2：加上保险 ---
+            {
+                "id": 2,
+                "title": "加上保险",
+                "phase": "第一章: 尘埃与回响",
+                "story_intro": "上次成功了，但信号质量下降了。\n近地轨道上的 Sat-1 已响应，但信道噪声比预想中更大。\n试试用编码技术来提高可靠性，再次发送初始化指令。",
+                "mission_info": "目标：向 Sat-1 发送初始化指令 \"EARTH_INIT\"\n挑战：设备老化严重，发射功率受限。\n建议：利用 BPSK 调制，并启用重复码 (Repetition Code) 作为双重保险。",
+                "mission_text": "任务：发送初始化指令至 Sat-1。\n当前信道状况：有噪声。\n建议策略：启用重复码 (Repetition(3,1)) 增强数据防护。",
+                "message": "EARTH_INIT",
+                "message_desc": "[系统初始化]",
+                "snr_db": 5,
+                "available_mods": ["BPSK"],
+                "available_codes": ["None", "Repetition(3,1)"],
+                "target_ber": 0.01,
+                "star_thresholds": {"one_star": 0.01, "two_star": 0.005, "three_star": 0.001},
                 "reward": "解调模块固件升级：获得 QPSK (正交相移键控) 支持",
                 # "educational_images": ... # Removed, using tutorial_slides instead for better flow
                 "tutorial_slides": [
@@ -48,7 +77,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 2,
+                "id": 3,
                 "title": "跨洋回响",
                 "phase": "第一章: 尘埃与回响",
                 "story_intro": "近地轨道链路已恢复，但这就够了吗？不。\n大西洋海底的旧光缆正在发出微弱的幽灵脉冲，那里封存着战前的关键气象数据。\n伦敦节点已经沉默了整整五年。我们需要建立一条横跨北大西洋的高速链路来唤醒它。\n上级批准了 QPSK 技术的实验性使用权限。我们需要速度，但越快的速度意味着越脆弱的抗干扰能力——就像在暴风雨中走钢丝。",
@@ -59,7 +88,8 @@ class LevelManager:
                 "snr_db": 1, 
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["None", "Repetition(3,1)"],
-                "target_ber": 0.01, 
+                "target_ber": 0.01,
+                "star_thresholds": {"one_star": 0.01, "two_star": 0.005, "three_star": 0.001},
                 "reward": "信道编码升级：获得 Hamming(7,4) 纠错码",
                 "nodes": [
                     {"name": "London", "pos": (200, 300), "origin_pos": (200, 300), "type": "src"},
@@ -74,7 +104,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 3,
+                "id": 4,
                 "title": "辐射云",
                 "phase": "第一章: 尘埃与回响",
                 "story_intro": "数据链路把世界重新连在了一起，但战争的阴影尚未散去。\n我们需要穿越一片高辐射的旧战区，向位于沙漠中心的自动工厂发送蓝图文件。那里有辐射尘暴，那里的电磁环境混乱得就像一锅煮沸的粥。\n普通的信号进去，出来的只有乱码。我们需要更聪明的校验机制。",
@@ -85,7 +115,8 @@ class LevelManager:
                 "snr_db": 1, 
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["None", "Repetition(3,1)", "Hamming(7,4)"],
-                "target_ber": 0.01, 
+                "target_ber": 0.01,
+                "star_thresholds": {"one_star": 0.01, "two_star": 0.005, "three_star": 0.001},
                 "reward": "网络拓扑数据更新：获得中继节点 (Relay) 权限",
                 "nodes": [
                     {"name": "Outpost A", "pos": (100, 100), "origin_pos": (100, 100), "type": "src"},
@@ -100,7 +131,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 4,
+                "id": 5,
                 "title": "中继网络",
                 "phase": "第一章: 尘埃与回响",
                 "story_intro": "工厂启动了，但我们的野心不止于此。为了覆盖整个由城市废墟构成的迷宫，单点对单点的传输已经不够用了。\n我们需要建立一个中继网络，绕过那些高耸的屏蔽墙（摩天大楼的残骸）。\n这是对你拓扑规划能力的考验。选错路径，信号就会死在半路上。",
@@ -111,7 +142,8 @@ class LevelManager:
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["None", "Hamming(7,4)"],
                 "target_ber": 0.05,
-                                "reward": "极化码原型机：获得 Polar Code (SC Decoder)",
+                "star_thresholds": {"one_star": 0.05, "two_star": 0.02, "three_star": 0.01},
+                "reward": "极化码原型机：获得 Polar Code (SC Decoder)",
                 # 节点索引: 0:HQ, 1:Relay Alpha, 2:Relay Beta, 3:Ruins
                 "snr_matrix": [
                     # To:  HQ    Alpha  Beta   Ruins
@@ -134,7 +166,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 5,
+                "id": 6,
                 "title": "极化初现",
                 "phase": "第一章: 尘埃与回响",
                 "story_intro": "这是地面通信的最后一块拼图。我们要在极度恶劣的雷雨天气中，向平流层飞艇发送控制流。\n传统的 Hamming 码已经力不从心，误码率居高不下。\n是时候祭出我们的新式武器——Polar Code 了。感受数学的力量吧，看它如何从混乱中提取秩序。",
@@ -145,6 +177,7 @@ class LevelManager:
                 "available_mods": ["BPSK", "QPSK"], 
                 "available_codes": ["Hamming(7,4)", "Polar(16,8)"], 
                 "target_ber": 0.005,
+                "star_thresholds": {"one_star": 0.005, "two_star": 0.002, "three_star": 0.001},
                 # 节点索引: 0:Ground, 1:Weather, 2:Thunder, 3:Airship
                 "snr_matrix": [
                     # To:  Ground Vane   Cloud  Airship
@@ -167,7 +200,7 @@ class LevelManager:
             },
             # --- Phase II: 星之方舟 (Ark of Stars) ---
             {
-                "id": 6,
+                "id": 7,
                 "title": "轨道突围",
                 "phase": "第二章: 星之方舟",
                 "story_intro": "地面的事情已经解决。现在，目光转向星空。\n'Ark' 计划启动——我们要向太阳系边缘发射深空探测器，寻找新家园的线索。\n但首先，我们必须突破布满太空垃圾的近地轨道封锁线。这里是卫星的坟场，信号的禁区。\n你需要在这里重新校准所有的通信协议。",
@@ -178,6 +211,7 @@ class LevelManager:
                 "available_mods": ["BPSK","QPSK"],
                 "available_codes": ["Repetition(3,1)", "Polar(256,128)", "Polar(1024,512)"],
                 "target_ber": 0.01,
+                "star_thresholds": {"one_star": 0.01, "two_star": 0.005, "three_star": 0.001},
                 "reward": "物理层大杀器：获得太空激光通讯 (Laser Link) 模组",
                 "tutorial_slides": [
                     {
@@ -203,8 +237,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 7,
-                # 注意：ID=7 在 main.py 中没有动态逻辑，保留静态即可
+                "id": 8,
                 "title": "木星引力",
                 "phase": "第二章: 星之方舟",
                 "story_intro": "激光通讯模块已上线。我们在木星轨道部署了中继器，利用其巨大的引力弹弓加速探测器。\n但木星强烈的磁暴产生了可怕的背景噪声。这是一场能量与精度的较量。\n启动激光模块，用光束刺穿这层电子迷雾。",
@@ -216,6 +249,7 @@ class LevelManager:
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)", "Polar(1024,512)"],
                 "target_ber": 0.002,
+                "star_thresholds": {"one_star": 0.002, "two_star": 0.001, "three_star": 0.0005},
                 "reward": "解码算法终极形态：获得 SCL (Successive Cancellation List) 解码器",
                 "nodes": [
                     {"name": "Europa Base", "pos": (100, 600), "origin_pos": (100, 600), "type": "src"},
@@ -230,7 +264,7 @@ class LevelManager:
                 }
             },
             {
-                "id": 8,
+                "id": 9,
                 "title": "碎石带",
                 "phase": "第二章: 星之方舟",
                 "story_intro": "警告：探测器群正在穿越小行星带。\n这里不仅有随机的物理撞击风险（如果运气不好），更有无数富含金属的小行星在反射和散射信号。\n这是一个动态迷宫。你需要利用 SCL 解码器的强力纠错性能，配合激光的穿透力，在这片混沌中杀出一条血路。\n注意：障碍物会遮挡视线，导致通信中断！选择正确的时机和路径。",
@@ -242,6 +276,7 @@ class LevelManager:
                 "available_mods": ["QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)"],
                 "target_ber": 0.0002,
+                "star_thresholds": {"one_star": 0.0002, "two_star": 0.0001, "three_star": 0.00005},
                 "reward": "获得深空探测器控制权",
                 "nodes": [
                     {"name": "Mission Control", "pos": (100, 400), "origin_pos": (100, 400), "type": "src"}, # Index 0
@@ -254,7 +289,7 @@ class LevelManager:
                 # obstacles list is generated by main.py
             },
             {
-                "id": 9,
+                "id": 10,
                 "title": "深渊凝视",
                 "phase": "第二章: 星之方舟",
                 "story_intro": "我们到达了柯伊伯带。这里是太阳系的尽头，光芒微弱得几乎看不见。\n这也是最后的考验。我们要向已经飞出日球层的“旅行者3号”同步最终的星图数据。\n距离极其遥远，信号要在虚空中漂泊数小时。每一个光子都弥足珍贵。\n在这里，只有最顶级的技术组合（Laser + QPSK + Polar-SCL）才能在虚无中点亮一丝火花。",
@@ -265,6 +300,7 @@ class LevelManager:
                 "available_mods": ["BPSK","QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)", "Polar(1024,512)"],
                 "target_ber": 0.0002,
+                "star_thresholds": {"one_star": 0.0002, "two_star": 0.0001, "three_star": 0.00005},
                 "reward": "通关游戏：解锁“无尽模式”与“开发者访谈”",
                 "nodes": [
                     {"name": "Unified Array", "pos": (100, 400), "origin_pos": (100, 400), "type": "src"}, # Offset for orbit
@@ -277,7 +313,7 @@ class LevelManager:
                 # obstacles list is generated by main.py
             },
             {
-                "id": 10,
+                "id": 11,
                 "title": "昆仑",
                 "phase": "终章: 归乡",
                 "story_intro": "星图已发出，我们的使命完成了。\n但在关闭系统前，还有一个特殊的请求。\n位于月球背面的昆仑基地发来了一条加密消息。\n那不是求救，是一首诗。用最古老的 BPSK 编码，写给地球的情书。\n让我们把这最后的声音，带回家。",
@@ -289,6 +325,7 @@ class LevelManager:
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)", "Polar(1024,512)"],
                 "target_ber": 0.0,
+                "star_thresholds": {"one_star": 0.001, "two_star": 0.0001, "three_star": 0.0},
                 "reward": "感谢游玩 SIGNAL FLOW PROTOCOL!",
                 "nodes": [
                     {"name": "KUNLUN Base", "pos": (950, 100), "origin_pos": (950, 100), "type": "src"}, # 0

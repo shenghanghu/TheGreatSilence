@@ -1,5 +1,6 @@
 import pygame
 import sys
+import math
 import numpy as np
 import os # 新增
 from dsp_engine import DSPEngine as dsp
@@ -121,12 +122,12 @@ def play_bgm(music_name):
         print(f"无法加载音乐 {path}: {e}")
 
 def get_level_music(level_id):
-    # 根据用户要求的逻辑映射音乐
-    if level_id in [1, 2, 3]: return "ofeliasdream.mp3"
-    if level_id in [4, 5]: return "deepblue.mp3"
-    if level_id in [6, 7]: return "fatalechoes.mp3"
-    if level_id == 8: return "newdawn.mp3"
-    if level_id in [9, 10]: return "dawnofchange.mp3"
+    # 根据用户要求的逻辑映射音乐（共11关）
+    if level_id in [1, 2, 3, 4]: return "ofeliasdream.mp3"
+    if level_id in [5, 6]: return "deepblue.mp3"
+    if level_id in [7, 8]: return "fatalechoes.mp3"
+    if level_id == 9: return "newdawn.mp3"
+    if level_id in [10, 11]: return "dawnofchange.mp3"
     return "ofeliasdream.mp3"
 
 current_state = STATE_START_SCREEN
@@ -143,6 +144,7 @@ g_knowledge_list = [] # Cached list of knowledge items
 g_current_knowledge_item = None
 g_intro_alpha = 0 # 介绍画面透明度
 g_intro_timer = 0 # 介绍画面计时器
+g_level_stars = {}  # 每关最佳星级 {level_id: 1|2|3} (阶段 2.2)
 
 # --- 绘图工具 ---
 credits_scroll_y = WINDOW_HEIGHT
@@ -299,6 +301,90 @@ def render_text_wrapped(surface, text, pos, max_width, font, color=(200, 200, 20
 
 # 用于绘制星座图残影的 Surface
 constellation_surface = None
+
+# ---------------------------------------------------------
+# 术语悬停提示 (阶段 1.2)
+# ---------------------------------------------------------
+TOOLTIPS = {
+    "BPSK": "二进制相移键控\n速度慢但最稳定",
+    "QPSK": "正交相移键控\n速度是BPSK的2倍",
+    "SNR": "信噪比\n数值越高信号越清晰",
+    "BER": "误码率\n数值越低传输越准确",
+    "Repetition(3,1)": "重复码\n每个比特重复3次",
+    "Hamming(7,4)": "汉明码\n可自动纠正1位错误",
+    "None": "无编码\n直接传输，无冗余",
+}
+def estimate_ber(snr_db, modulation, coding):
+    """预估当前配置下的理论误码率（用于参数预览）"""
+    if snr_db <= -20:
+        return 0.5
+    snr_linear = 10 ** (snr_db / 10.0)
+    # BPSK: BER ≈ 0.5*erfc(sqrt(snr_linear))
+    # QPSK: 近似同量级
+    try:
+        theoretical_ber = 0.5 * math.erfc(math.sqrt(snr_linear))
+    except (ValueError, OverflowError):
+        theoretical_ber = 1e-6
+    theoretical_ber = max(1e-7, min(0.5, theoretical_ber))
+    if coding and coding != "None":
+        if coding == "Repetition(3,1)":
+            theoretical_ber *= 0.1
+        elif coding == "Hamming(7,4)":
+            theoretical_ber *= 0.3
+        elif coding.startswith("Polar"):
+            theoretical_ber *= 0.2
+    return theoretical_ber
+
+def estimate_stars(estimated_ber, target_ber):
+    """根据预估 BER 与目标 BER 返回建议星级 (1-5)"""
+    if target_ber <= 0:
+        return 5
+    ratio = estimated_ber / target_ber
+    if ratio < 0.5: return 5
+    if ratio < 0.8: return 4
+    if ratio < 1.0: return 3
+    if ratio < 1.5: return 2
+    return 1
+
+def calculate_stars(ber, thresholds):
+    """根据实际 BER 与关卡 star_thresholds 计算获得星级 (0-3)"""
+    if not thresholds:
+        return 1 if ber < 0.1 else 0
+    one = thresholds.get('one_star', 0.01)
+    two = thresholds.get('two_star', 0.005)
+    three = thresholds.get('three_star', 0.001)
+    if ber <= three: return 3
+    if ber <= two: return 2
+    if ber <= one: return 1
+    return 0
+
+def draw_tooltip(surface, text, mouse_pos, font_obj=None):
+    if not text or not font_obj:
+        return
+    lines = text.strip().split("\n")
+    line_h = font_obj.get_linesize()
+    max_w = 0
+    for line in lines:
+        w, _ = font_obj.size(line)
+        max_w = max(max_w, w)
+    box_w = max_w + 24
+    box_h = len(lines) * line_h + 16
+    tx = mouse_pos[0] + 20
+    ty = mouse_pos[1] + 20
+    if tx + box_w > surface.get_width():
+        tx = mouse_pos[0] - box_w - 10
+    if ty + box_h > surface.get_height():
+        ty = surface.get_height() - box_h - 10
+    if ty < 0:
+        ty = 10
+    tooltip_rect = pygame.Rect(tx, ty, box_w, box_h)
+    s = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    s.fill((20, 22, 28, 240))
+    pygame.draw.rect(s, (60, 70, 85), s.get_rect(), 1, border_radius=4)
+    surface.blit(s, tooltip_rect)
+    for i, line in enumerate(lines):
+        surf = font_obj.render(line, True, (220, 220, 220))
+        surface.blit(surf, (tx + 12, ty + 8 + i * line_h))
 
 # ---------------------------------------------------------
 # 新增：名词翻译函数 (Game Flavor Translation)
@@ -794,6 +880,18 @@ def draw_briefing_screen(surface, level, btn):
         val = font.render(level['reward'], True, (255, 255, 255))
         surface.blit(lbl, (100, y_reward))
         surface.blit(val, (100, y_reward + 25))
+    # 已获星级 (阶段 2.2)
+    earned = g_level_stars.get(level.get('id'), 0)
+    star_y = y_reward + 55
+    surface.blit(label_font.render("已获星级:", True, (255, 200, 50)), (100, star_y))
+    GOLD, GRAY = (255, 200, 50), (80, 80, 80)
+    for i in range(3):
+        x = 200 + i * 28
+        if i < earned:
+            star_surf = label_font.render("★", True, GOLD)
+        else:
+            star_surf = label_font.render("☆", True, GRAY)
+        surface.blit(star_surf, (x, star_y))
 
     btn.draw(surface)
 
@@ -1514,6 +1612,7 @@ def main():
     
     is_animating = False
     anim_progress = 0.0
+    transmission_stats_until = 0  # 传输完成统计覆盖层 (2.3)
     
     ui_mod_rects = []
     ui_code_rects = []
@@ -1573,7 +1672,7 @@ def main():
         except:
             lvl_id = 999
             
-        if lvl_id >= 6:
+        if isinstance(lvl_id, int) and lvl_id >= 7:
             has_laser_tech = True
             
         if 'nodes' in lvl:
@@ -1653,8 +1752,8 @@ def main():
         
         t = pygame.time.get_ticks() / 1000.0 # Time in seconds
         
-        # Level 6: Escape Velocity - Orbital Mechanics
-        if level['id'] == 6:
+        # Level 7 (轨道突围): Escape Velocity - Orbital Mechanics
+        if level['id'] == 7:
             # Nodes: 
             # 0:Earth(Static), 1:Orbital(Orbit Earth), 2:DebrisA(Chaos), 
             # 3:L1(Lissajous), 4:LunarOrbit(Orbit Moon), 5:DebrisB(Chaos), 6:Luna(Static)
@@ -1696,8 +1795,8 @@ def main():
             ox, oy = node['origin_pos']
             node['pos'] = (ox + 15 * np.sin(t*2.0 + 1), oy + 15 * np.cos(t*1.8))
         
-        # Level 8: Asteroid Maze - Dynamic Obstacles
-        elif level['id'] == 8:
+        # Level 9 (碎石带): Asteroid Maze - Dynamic Obstacles
+        elif level['id'] == 9:
             # 1. Update Relay Nodes (Orbiting Central Probe)
             # Center Probe (Index 3) - Static
             cx, cy = level['nodes'][3]['origin_pos']
@@ -1745,8 +1844,8 @@ def main():
                     cy + obs['orbit_r'] * np.sin(angle)
                 )
 
-        # Level 9: The Void (Kuiper Belt)
-        elif level['id'] == 9:
+        # Level 10 (深渊凝视): The Void (Kuiper Belt)
+        elif level['id'] == 10:
             # Nodes: 0:Unified Array(Static), 1:Kuiper A, 2:Kuiper B, 3:Oort, 4:Deep Space, 5:The Void(Dest)
             
             # Center (Unified Array) - Static
@@ -1799,8 +1898,8 @@ def main():
                     obs['center'][1] + obs['orbit_r'] * np.sin(angle) * 0.6 # Flattened
                 )
         
-        # Level 10: Kunlun (Solar System)
-        elif level['id'] == 10:
+        # Level 11 (昆仑): Kunlun (Solar System)
+        elif level['id'] == 11:
             # Nodes: 0:KUNLUN(Src), 1:Defense Sat, 2:Jovian Relay, 3:Mars, 4:Moon, 5:EARTH(Dest)
             
             # Node 5 (EARTH) - Static Anchor (Bottom Left)
@@ -2077,7 +2176,7 @@ def main():
         return tx_power - path_loss - system_loss + node_gain
 
     def finish_sim():
-        nonlocal sim_result, level_complete
+        nonlocal sim_result, level_complete, transmission_stats_until
         level = level_mgr.get_current_level()
         
         raw_bits = dsp.str_to_bits(level['message'])
@@ -2185,8 +2284,8 @@ def main():
             # Legacy Single Hop (Level 1 etc)
             enc_bits = dsp.encode_data(raw_bits, current_code)
             tx_syms = dsp.modulate(enc_bits, current_mod)
-            use_noise = level.get('id') != 1
             snr = level.get('snr_db', 10)
+            use_noise = True  # 所有关卡均使用噪声，由 snr_db 控制
             
             if laser_module_active:
                 lvl_id_safe = level.get('id', 0)
@@ -2211,9 +2310,9 @@ def main():
         rx_msg = dsp.bits_to_str(final_rx_bits)
         ber = dsp.calculate_ber(raw_bits, final_rx_bits)
         
-        # --- HACK: Level 10 Special Fix for Error Floor ---
+        # --- HACK: Level 11 (昆仑) Special Fix for Error Floor ---
         # 如果 BER 约为 0.0018 (即那个无法消除的 7 bits error)，且使用的是最强编码，则给 20% 机会直接通过
-        if level.get('id') == 10 and current_code == "Polar(1024,512)":
+        if level.get('id') == 11 and current_code == "Polar(1024,512)":
             if 0.0017 < ber < 0.0019: # 0.0018 ± tolerance
                 if np.random.random() < 0.2:
                      ber = 0.0
@@ -2245,6 +2344,13 @@ def main():
         
         if passed: 
             level_complete = True
+            # 三星评价 (2.2)：计算并保存星级
+            level_id = level.get('id')
+            if isinstance(level_id, int):
+                thresholds = level.get('star_thresholds', {})
+                stars = calculate_stars(ber, thresholds)
+                global g_level_stars
+                g_level_stars[level_id] = max(g_level_stars.get(level_id, 0), stars)
             
             # Unlock Secret Reward
             if level.get('id') == "HIDDEN_SAT_ARRAY":
@@ -2279,12 +2385,17 @@ def main():
             else:
                 failure_reason = "同步失败：接收端无法在当前信噪比下恢复有效比特流。"
 
+        stars_earned = 0
+        if passed and isinstance(level.get('id'), int):
+            thresholds = level.get('star_thresholds', {})
+            stars_earned = calculate_stars(ber, thresholds)
         sim_result = {
             "level_id": level.get('id'),
             "rx_syms": rx_syms,
             "rx_msg": rx_msg,
             "ber": ber,
             "success": passed,
+            "stars": stars_earned,
             "tx_txt": level['message'],
             "final_snr": last_snr,
             "steps": steps,
@@ -2301,13 +2412,16 @@ def main():
             }
         }
 
+        # 传输过程可视化 (2.3)：显示统计覆盖层 4 秒
+        transmission_stats_until = pygame.time.get_ticks() + 4000
+
         # 隐藏关：3次机会用完后自动结算退出
         if level.get('id') == 'HIDDEN_SAT_ARRAY' and hidden_attempts >= MAX_HIDDEN_ATTEMPTS:
             # 延迟一小会执行（或直接执行，因为分析界面还没弹出来）
             cb_exit_hidden()
         
     def cb_next_level():
-        nonlocal level_complete, sim_result, current_mod, current_code, is_animating, path_indices, energy, has_laser_tech
+        nonlocal level_complete, sim_result, current_mod, current_code, is_animating, path_indices, energy, has_laser_tech, transmission_stats_until
         global current_state, g_tech_unlock_level
         
         # Award Energy (Up to 10 max)
@@ -2323,14 +2437,15 @@ def main():
                 sim_result = None
                 is_animating = False
                 path_indices = [] # Reset path
+                transmission_stats_until = 0
                 
                 # The NEW current level
                 new_lvl = level_mgr.get_current_level()
                 current_mod = new_lvl['available_mods'][0]
                 current_code = new_lvl.get('available_codes', ["None"])[0]
                 
-                # Update Technology: Unlock Laser if we are at level 6 or higher
-                if new_lvl['id'] >= 6:
+                # Update Technology: Unlock Laser if we are at level 7 (id 7) or higher
+                if isinstance(new_lvl.get('id'), int) and new_lvl['id'] >= 7:
                     has_laser_tech = True
                 
                 # Check directly in the COMPLETED level's data for tech unlock info.
@@ -2387,13 +2502,14 @@ def main():
         current_state = STATE_START_SCREEN
 
     def cb_restart_level():
-        nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts
+        nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts, transmission_stats_until
         # Reset State
         path_indices = []
         sim_result = None
         level_complete = False
         is_animating = False
         energy = 10 # Reset energy to full on restart
+        transmission_stats_until = 0
         
         # Check if hidden level
         current_lvl = level_mgr.get_current_level()
@@ -2922,13 +3038,13 @@ def main():
                     # Update rotation
                     obs['rotation'] += obs['rot_speed']
                     
-                    if level['id'] == 8: # Asteroids
+                    if level['id'] == 9: # Asteroids (碎石带)
                         color = (80, 70, 60)
                         outline = (100, 90, 80)
-                    elif level['id'] == 9: # Ice chunks (Kuiper)
+                    elif level['id'] == 10: # Ice chunks (深渊凝视)
                         color = (130, 180, 220, 200) # Light Blue
                         outline = (180, 220, 255)
-                    elif level['id'] == 10: # Solar/Tech
+                    elif level['id'] == 11: # Solar/Tech (昆仑)
                         if obs.get('type') == 'solar':
                             color = (255, 100, 50) # Orange
                             outline = (255, 200, 50)
@@ -2943,7 +3059,7 @@ def main():
                         outline = (150, 150, 150)
                     
                     # Draw Poly
-                    if level['id'] in [8, 9] or (level['id'] == 10 and obs.get('type') != 'solar'):
+                    if level['id'] in [9, 10] or (level['id'] == 11 and obs.get('type') != 'solar'):
                         # Transform points
                         rot_points = []
                         cx, cy = pos
@@ -3128,7 +3244,7 @@ def main():
                 screen.blit(label_font.render("DEC:", True, (150,150,150)), (bx+10, y+5))
                 methods = ["SC"]
                 lvl_id = level.get('id', 1)
-                if (isinstance(lvl_id, int) and lvl_id >= 6) or isinstance(lvl_id, str): methods.append("BP")
+                if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str): methods.append("BP")
                 if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str): methods.append("SCL")
                 
                 for j, method in enumerate(methods):
@@ -3142,7 +3258,7 @@ def main():
                 y += 40
             
             # Laser Tech (Unlock Check: Level >= 6)
-            if isinstance(level.get('id', 0), int) and level.get('id', 0) >= 6:
+            if isinstance(level.get('id', 0), int) and level.get('id', 0) >= 7:
                 has_laser_tech = True
             
             if has_laser_tech:
@@ -3158,6 +3274,21 @@ def main():
                 y += 40
 
             y += 10 # Spacer
+
+            # --- 2.5 当前配置预览 (阶段 2.1) ---
+            preview_h = 100
+            pygame.draw.rect(screen, (18, 22, 28), (bx+10, y, HUD_WIDTH-20, preview_h), border_radius=6)
+            pygame.draw.rect(screen, (50, 60, 75), (bx+10, y, HUD_WIDTH-20, preview_h), 1, border_radius=6)
+            screen.blit(label_font.render("当前配置预览", True, ACCENT_COLOR), (bx+18, y+6))
+            snr_preview = level.get('snr_db', 5)
+            est_ber = estimate_ber(snr_preview, current_mod or "BPSK", current_code)
+            target_ber = level['target_ber']
+            star_num = estimate_stars(est_ber, target_ber)
+            screen.blit(label_font.render(f"调制: {current_mod or '—'}  编码: {current_code or '—'}", True, (200,200,200)), (bx+18, y+26))
+            screen.blit(label_font.render(f"预计误码率: ~{est_ber:.4f}", True, (180,200,180)), (bx+18, y+46))
+            star_str = "★" * star_num + "☆" * (5 - star_num)
+            screen.blit(label_font.render(f"建议: {star_str}", True, (255, 200, 50)), (bx+18, y+66))
+            y += preview_h + 8
 
             # --- 3. Link Quality Monitor (Gauge) ---
             y_gauge = y + 5
@@ -3195,6 +3326,17 @@ def main():
             ber_str = f"{curr_ber:.4f}" if sim_result else "----"
             screen.blit(font.render(f"当前: {ber_str}", True, (220,220,220)), (bx+30, y_gauge+85))
             screen.blit(label_font.render(f"目标: <{target_ber}", True, (150,150,150)), (bx+HUD_WIDTH-120, y_gauge+88))
+            # 三星评价显示 (2.2)：过关时显示本次获得的星级
+            if level_complete and sim_result and sim_result.get('success'):
+                stars = sim_result.get('stars', 0)
+                GOLD, GRAY = (255, 200, 50), (80, 80, 80)
+                screen.blit(label_font.render("本次星级:", True, GOLD), (bx+20, y_gauge+108))
+                for i in range(3):
+                    sx = bx + 120 + i * 22
+                    if i < stars:
+                        screen.blit(label_font.render("★", True, GOLD), (sx, y_gauge+105))
+                    else:
+                        screen.blit(label_font.render("☆", True, GRAY), (sx, y_gauge+105))
 
             # --- 4. Diagnostic Log / Signal History ---
             # Dynamic resizing based on available vertical space
@@ -3254,6 +3396,22 @@ def main():
             
             screen.set_clip(None)
 
+            # 术语悬停提示 (1.2)：在 HUD 区域检测调制/编码按钮悬停
+            if not is_animating:
+                mouse_pos = pygame.mouse.get_pos()
+                hover_tooltip = None
+                for r, name in ui_mod_rects:
+                    if r.collidepoint(mouse_pos):
+                        hover_tooltip = TOOLTIPS.get(name, None)
+                        break
+                if hover_tooltip is None:
+                    for r, name in ui_code_rects:
+                        if r.collidepoint(mouse_pos):
+                            hover_tooltip = TOOLTIPS.get(name, None)
+                            break
+                if hover_tooltip:
+                    draw_tooltip(screen, hover_tooltip, mouse_pos, label_font)
+
             # Task Card (Repositioned to the Map Area)
             # 1. Pre-calculate height
             temp_y = 125
@@ -3294,57 +3452,43 @@ def main():
                 draw_analysis_report(screen, sim_result, btn_close_report)
 
             # -------------------------------------------------------------
-            # TUTORIAL RENDER LOGIC (教程逻辑)
-            # 放在 flip() 之前，确保画在最上层
+            # TUTORIAL RENDER LOGIC (教程逻辑，由关卡 tutorial_steps 驱动)
             if g_tutorial.active and not level_complete and current_state == STATE_PLAYING:
-                # STEP 1: 连接线路
-                if g_tutorial.step == 0:
-                    # 获取屏幕左侧中间区域作为提示区
-                    target = pygame.Rect(100, 100, MAP_WIDTH - 200, 600)
-                    g_tutorial.draw(screen, target, "第一步：点击绿色节点，再点击红色节点以建立通信链路")
-                    
-                    # 检查是否完成: 建立了路径
-                    if len(path_indices) >= 2:
+                tutorial_steps = level.get('tutorial_steps') or []
+                if tutorial_steps and g_tutorial.step < len(tutorial_steps):
+                    step_info = tutorial_steps[g_tutorial.step]
+                    highlight = step_info.get('highlight', '')
+                    text = step_info.get('text', '')
+                    target_rect = pygame.Rect(100, 100, MAP_WIDTH - 200, 600)
+                    if highlight == 'modulation_panel' or highlight == 'modulation':
+                        target_rect = rect_mod_bpsk
+                    elif highlight == 'coding_panel' or highlight == 'coding':
+                        target_rect = rect_code_rep if rect_code_rep.width > 0 else pygame.Rect(bx+60, 340, 200, 40)
+                    elif highlight == 'send_button':
+                        target_rect = rect_tx_btn
+                    elif highlight == 'ber_display':
+                        target_rect = rect_gauge
+                    g_tutorial.draw(screen, target_rect, text)
+                    # 根据当前步骤检查是否可进入下一步
+                    if highlight == 'path' and len(path_indices) >= 2:
                         g_tutorial.next()
-                
-                # STEP 2: 选择调制 (只有当没选 BPSK 时才提示，或者强制提示一次)
-                elif g_tutorial.step == 1:
-                    g_tutorial.draw(screen, rect_mod_bpsk, "第二步：选择 BPSK 以对抗噪声")
-                    
-                    # 检查是否完成: 选中了 BPSK
-                    if current_mod == "BPSK":
+                    elif (highlight == 'modulation_panel' or highlight == 'modulation') and current_mod == "BPSK":
                         g_tutorial.next()
-
-                # STEP 3: 选择编码 (必须选中 Repetition)
-                elif g_tutorial.step == 2:
-                    target_rect = rect_code_rep if rect_code_rep.width > 0 else pygame.Rect(MAP_WIDTH+60, 400, 200, 40) # Fallback
-                    g_tutorial.draw(screen, target_rect, "第三步：选择 Repetition(3,1) 增强数据防护")
-                    
-                    # 检查是否完成: 选中了 Repetition
-                    if current_code == "Repetition(3,1)":
+                    elif (highlight == 'coding_panel' or highlight == 'coding') and current_code == "Repetition(3,1)":
                         g_tutorial.next()
-                        
-                # STEP 4: 发射信号
-                elif g_tutorial.step == 3:
-                    g_tutorial.draw(screen, rect_tx_btn, "第四步：点击广播序列，发射信号！")
-                    
-                    # 检查是否完成: 开始动画
-                    if is_animating:
+                    elif highlight == 'send_button' and is_animating:
                         g_tutorial.next()
-                        
-                # STEP 5: 观察结果
-                elif g_tutorial.step == 4:
-                     # 分析结果出来后
-                     if sim_result is not None and not is_animating:
-                         g_tutorial.draw(screen, rect_gauge, "最终步：观察误码率。必须低于目标阈值才能通关。")
-                         
-                         # 这里我们不自动跳转，让玩家自己点击“跳转扇区”或“分析报告”
-                         # 只要出结果就算教程结束，稍后自动隐藏
-                         if level_complete:
-                             pass
+                    elif highlight == 'ber_display' and sim_result is not None and not is_animating:
+                        if g_tutorial.step + 1 >= len(tutorial_steps):
+                            g_tutorial.completed = True
+                        else:
+                            g_tutorial.next()
+                elif tutorial_steps and g_tutorial.step >= len(tutorial_steps):
+                    g_tutorial.completed = True
             # -------------------------------------------------------------
-                btn_next.draw(screen)
             
+            if level_complete and level.get('id') != 'HIDDEN_SAT_ARRAY':
+                btn_next.draw(screen)
             if sim_result and not is_animating: btn_analysis.draw(screen)
             
             # Restart Button (Always visible in Playing unless restricted)
@@ -3357,6 +3501,26 @@ def main():
             # Analysis Overlay
             if show_analysis:
                 draw_analysis_report(screen, sim_result, btn_close_report)
+
+            # 传输过程可视化 (2.3)：传输完成后显示统计覆盖层
+            if sim_result and not is_animating and transmission_stats_until > 0 and pygame.time.get_ticks() < transmission_stats_until:
+                ber = sim_result.get('ber', 0)
+                total = 50
+                correct = int(total * (1 - ber))
+                error = total - correct
+                box_w, box_h = 320, 140
+                cx = MAP_WIDTH // 2
+                cy = WINDOW_HEIGHT // 2
+                box_rect = pygame.Rect(cx - box_w//2, cy - box_h//2, box_w, box_h)
+                s = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+                s.fill((15, 18, 22, 230))
+                pygame.draw.rect(s, (60, 70, 90), (0, 0, box_w, box_h), 2, border_radius=8)
+                screen.blit(s, box_rect)
+                screen.blit(header_font.render("传输完成", True, ACCENT_COLOR), (box_rect.x + 20, box_rect.y + 12))
+                pygame.draw.line(screen, (60, 70, 90), (box_rect.x + 15, box_rect.y + 48), (box_rect.right - 15, box_rect.y + 48), 1)
+                screen.blit(font.render(f"✓ 正确: {correct} 个", True, SUCCESS_COLOR), (box_rect.x + 25, box_rect.y + 58))
+                screen.blit(font.render(f"✗ 错误: {error} 个", True, ERROR_COLOR), (box_rect.x + 25, box_rect.y + 82))
+                screen.blit(font.render(f"最终误码率: {ber:.4f}", True, (220, 220, 220)), (box_rect.x + 25, box_rect.y + 106))
 
         pygame.display.flip()
         clock.tick(60)
