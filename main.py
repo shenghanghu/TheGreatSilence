@@ -2616,6 +2616,7 @@ def main():
 
     def finish_sim():
         nonlocal sim_result, level_complete, transmission_stats_until
+        global g_level_stars, g_game_stats, g_achievement_manager, g_achievement_popup_queue
         level = level_mgr.get_current_level()
         
         raw_bits = dsp.str_to_bits(level['message'])
@@ -2785,7 +2786,6 @@ def main():
         level_id = level.get('id')
         if not passed and isinstance(level_id, int):
             key = str(level_id)
-            global g_game_stats
             fails = g_game_stats.get("level_fail_count", {}) or {}
             fails[key] = int(fails.get(key, 0)) + 1
             g_game_stats["level_fail_count"] = fails
@@ -2802,7 +2802,6 @@ def main():
             if isinstance(level_id, int):
                 thresholds = level.get('star_thresholds', {})
                 stars = calculate_stars(ber, thresholds)
-                global g_level_stars, g_game_stats, g_achievement_manager, g_achievement_popup_queue
                 g_level_stars[level_id] = max(g_level_stars.get(level_id, 0), stars)
                 # 阶段三 3.1/3.2：更新游戏统计、评分、成就
                 time_spent = (pygame.time.get_ticks() - g_level_start_time) / 1000.0
