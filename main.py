@@ -97,6 +97,35 @@ STATE_SETTINGS = 9 # 新增设置状态
 STATE_LETTER_VIEW = 10 # 新增信件展示状态
 STATE_INTRO_1 = 11 # 新增开场 1: HOPE IS A WAVEFORM
 STATE_INTRO_2 = 12 # 新增开场 2: IS ANYONE OUT THERE?
+STATE_LEVEL_CATALOG = 13 # 关卡目录（选择关卡）
+
+# --- 存档路径 ---
+SAVE_FILE = "save.json"
+
+def save_progress(level_idx, stars_dict):
+    """将当前关卡进度与星级写入存档"""
+    try:
+        import json
+        path = resource_path(SAVE_FILE)
+        data = {"current_level_idx": level_idx, "level_stars": stars_dict}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=0)
+    except Exception as e:
+        print(f"Save failed: {e}")
+
+def load_progress():
+    """从存档读取关卡进度与星级，返回 (level_idx, stars_dict) 或 None"""
+    try:
+        import json
+        path = resource_path(SAVE_FILE)
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return (data.get("current_level_idx", 0), data.get("level_stars", {}))
+    except Exception as e:
+        print(f"Load failed: {e}")
+        return None
 
 # --- 音乐管理 ---
 current_bgm = None
@@ -145,6 +174,7 @@ g_current_knowledge_item = None
 g_intro_alpha = 0 # 介绍画面透明度
 g_intro_timer = 0 # 介绍画面计时器
 g_level_stars = {}  # 每关最佳星级 {level_id: 1|2|3} (阶段 2.2)
+g_level_catalog_rects = []  # 关卡目录每项的可点击区域 [(rect, level_idx), ...]
 
 # --- 绘图工具 ---
 credits_scroll_y = WINDOW_HEIGHT
@@ -781,24 +811,57 @@ def draw_image_fit(surface, img_path, center_pos, max_size):
     except Exception as e:
         print(f"Failed to load image {img_path}: {e}")
 
-def draw_start_screen(surface, btn_start, btn_kv, btn_settings):
+# 开始页背景：蓝色星星划过特效（持久化列表，每帧更新）
+_g_start_stars = []
+
+def _init_start_stars():
+    global _g_start_stars
+    if _g_start_stars:
+        return
+    for _ in range(48):
+        _g_start_stars.append({
+            'x': np.random.randint(0, WINDOW_WIDTH),
+            'y': np.random.randint(0, WINDOW_HEIGHT),
+            'speed': 0.8 + np.random.rand() * 1.5,
+            'size': 1 + int(np.random.rand() * 2),
+            'bright': 0.4 + np.random.rand() * 0.6,
+        })
+
+def _update_draw_start_stars(surface):
+    _init_start_stars()
+    for s in _g_start_stars:
+        s['x'] -= s['speed']
+        if s['x'] < -4:
+            s['x'] = WINDOW_WIDTH + 4
+            s['y'] = np.random.randint(0, WINDOW_HEIGHT)
+        r = int(80 * s['bright'])
+        g = int(160 * s['bright'])
+        b = int(255 * s['bright'])
+        color = (r, g, b)
+        pygame.draw.circle(surface, color, (int(s['x']), int(s['y'])), s['size'])
+
+def draw_start_screen(surface, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings):
     surface.fill(BG_COLOR)
+    _update_draw_start_stars(surface)
     
     # Title
     t1 = header_font.render("THE GREAT SILENCE", True, ACCENT_COLOR)
     t2 = header_font.render("大静默", True, (255, 255, 255))
-    
     mx = WINDOW_WIDTH // 2
+    surface.blit(t1, (mx - t1.get_width() // 2, 200))
+    surface.blit(t2, (mx - t2.get_width() // 2, 248))
     
-    # Layout
-    surface.blit(t1, (mx - t1.get_width() // 2, 220))
-    surface.blit(t2, (mx - t2.get_width() // 2, 270))
-    
-    pygame.draw.line(surface, (50, 60, 70), (mx - 200, 310), (mx + 200, 310), 1)
+    # 分隔线与说明：全竖排下留足间距
+    line_y = 318
+    pygame.draw.line(surface, (50, 60, 70), (mx - 200, line_y), (mx + 200, line_y), 1)
+    hint = label_font.render("新游戏覆盖存档 · 继续游戏读取本地存档", True, (120, 130, 140))
+    surface.blit(hint, (mx - hint.get_width() // 2, line_y + 14))
 
-    btn_start.draw(surface)
-    btn_settings.draw(surface)
+    btn_new_game.draw(surface)
+    btn_continue.draw(surface)
+    btn_level_catalog.draw(surface)
     btn_kv.draw(surface)
+    btn_settings.draw(surface)
 
 def draw_intro_screen(surface, text, color, alpha):
     surface.fill((0, 0, 0)) # 纯黑背景
@@ -844,6 +907,61 @@ def draw_settings_screen(surface, btn_back, slider_vol):
     slider_vol.draw(surface)
     
     # Back button
+    btn_back.draw(surface)
+
+def _draw_lock_icon(surface, center_x, center_y, size=14, color=(120, 120, 130)):
+    """在给定中心绘制简易锁图标（矩形+顶部弧线），表示未解锁"""
+    r = size // 2
+    body = pygame.Rect(center_x - r, center_y - r // 2, r * 2, r + 2)
+    pygame.draw.rect(surface, color, body, border_radius=2)
+    # 锁扣弧线
+    arc_rect = pygame.Rect(center_x - r - 2, center_y - r - 4, r * 2 + 4, r + 2)
+    pygame.draw.arc(surface, color, arc_rect, np.pi, 0, 2)
+
+def draw_level_catalog(surface, level_mgr, stars_dict, btn_back):
+    """绘制关卡目录，并填充 g_level_catalog_rects 供点击检测；未解锁关卡显示锁且不可点击"""
+    global g_level_catalog_rects
+    surface.fill(BG_COLOR)
+    title = header_font.render("关卡目录", True, ACCENT_COLOR)
+    surface.blit(title, (80, 25))
+    sub = label_font.render("点击已解锁关卡进入简报 · 进度已自动保存", True, (150, 150, 150))
+    surface.blit(sub, (80, 58))
+    pygame.draw.line(surface, ACCENT_COLOR, (80, 85), (WINDOW_WIDTH - 80, 85), 2)
+    g_level_catalog_rects = []
+    y = 115
+    col_w = 380
+    gap = 24
+    for idx, lv in enumerate(level_mgr.levels):
+        lid = lv.get("id")
+        if isinstance(lid, str):
+            continue
+        row = (idx // 3)
+        col = idx % 3
+        x = 80 + col * (col_w + gap)
+        cy = y + row * 72
+        rect = pygame.Rect(x, cy, col_w, 64)
+        unlocked = idx <= level_mgr.current_level_idx
+        if unlocked:
+            g_level_catalog_rects.append((rect, idx))
+        color = (28, 35, 45)
+        if not unlocked:
+            color = (22, 26, 32)
+        if idx == level_mgr.current_level_idx:
+            pygame.draw.rect(surface, (40, 55, 75), rect, border_radius=8)
+            pygame.draw.rect(surface, ACCENT_COLOR, rect, 2, border_radius=8)
+        else:
+            pygame.draw.rect(surface, color, rect, border_radius=8)
+            pygame.draw.rect(surface, (50, 60, 75), rect, 1, border_radius=8)
+        title_text = lv.get("title", f"关卡 {lid}")
+        star_count = stars_dict.get(lid, 0)
+        star_str = "★" * star_count + "☆" * (3 - star_count)
+        text_color = (220, 220, 220) if unlocked else (100, 100, 110)
+        surf_title = label_font.render(f"{lid}. {title_text}", True, text_color)
+        surf_star = label_font.render(star_str, True, (255, 200, 50)) if unlocked else label_font.render("—", True, (80, 80, 90))
+        surface.blit(surf_title, (x + 12, cy + 10))
+        surface.blit(surf_star, (x + 12, cy + 36))
+        if not unlocked:
+            _draw_lock_icon(surface, x + col_w - 24, cy + 32, 16, (100, 100, 110))
     btn_back.draw(surface)
 
 def draw_briefing_screen(surface, level, btn):
@@ -1593,7 +1711,13 @@ def draw_ghost_cube(surface):
 
 # --- APP ---
 def main():
-    global current_state, previous_state, g_letter_scroll_idx, g_intro_alpha, g_intro_timer
+    global current_state, previous_state, g_letter_scroll_idx, g_intro_alpha, g_intro_timer, g_level_stars
+    
+    # 加载存档（关卡进度与星级）
+    loaded = load_progress()
+    if loaded:
+        level_mgr.current_level_idx = min(loaded[0], len(level_mgr.levels) - 1)
+        g_level_stars = loaded[1] if isinstance(loaded[1], dict) else {}
     
     current_mod = "BPSK"
     current_code = "None"
@@ -1630,13 +1754,38 @@ def main():
     # To prevent polluting the original levels.py data, we need to deep copy nodes when mission starts.
     import copy
 
-    def cb_start_game():
-        global current_state, g_intro_alpha, g_intro_timer
-        # 进入开场动画
+    def cb_new_game():
+        """新游戏：覆盖存档并从第一关开场开始"""
+        global current_state, g_intro_alpha, g_intro_timer, g_level_stars
+        save_progress(0, {})
+        level_mgr.current_level_idx = 0
+        g_level_stars = {}
         current_state = STATE_INTRO_1
         g_intro_alpha = 0
         g_intro_timer = 0
-        play_bgm(None) # 静音
+        play_bgm(None)
+
+    def cb_continue_game():
+        """继续游戏：读取本地存档并进入关卡目录"""
+        global current_state, g_level_stars
+        loaded = load_progress()
+        if loaded:
+            level_mgr.current_level_idx = min(loaded[0], len(level_mgr.levels) - 1)
+            g_level_stars = loaded[1] if isinstance(loaded[1], dict) else {}
+        else:
+            level_mgr.current_level_idx = 0
+            g_level_stars = {}
+        current_state = STATE_LEVEL_CATALOG
+        play_bgm("ofeliasdream.mp3")
+
+    def cb_open_level_catalog():
+        global current_state
+        current_state = STATE_LEVEL_CATALOG
+        play_bgm("ofeliasdream.mp3")
+
+    def cb_catalog_back():
+        global current_state
+        current_state = STATE_START_SCREEN
 
     def cb_skip_intro():
         # 跳过开场直接进 BRIEFING
@@ -2503,19 +2652,20 @@ def main():
         current_state = STATE_START_SCREEN
 
     def cb_restart_level():
+        global current_state
         nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts, transmission_stats_until
-        # Reset State
+        # 保存进度并返回关卡目录
+        save_progress(level_mgr.current_level_idx, g_level_stars)
         path_indices = []
         sim_result = None
         level_complete = False
         is_animating = False
-        energy = 10 # Reset energy to full on restart
+        energy = 10
         transmission_stats_until = 0
-        
-        # Check if hidden level
+        current_state = STATE_LEVEL_CATALOG
         current_lvl = level_mgr.get_current_level()
         if current_lvl and current_lvl.get('id') == 'HIDDEN_SAT_ARRAY':
-            hidden_attempts = 0 # Reset attempts
+            hidden_attempts = 0
             global num_repaired_satellites
             num_repaired_satellites = 0
 
@@ -2581,10 +2731,15 @@ def main():
             path_indices = []
             is_animating = False
 
-    btn_start = Button(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 + 50, 240, 60, "打破静默", cb_start_game, (0, 100, 150))
-    # 稍微调整一下按钮宽度以容纳更长的文字
-    btn_kv = Button(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 + 130, 240, 60, "失落数据", cb_open_knowledge_menu, (100, 100, 120))
-    btn_settings = Button(WINDOW_WIDTH//2 - 120, WINDOW_HEIGHT//2 + 210, 240, 60, "系统设置", cb_open_settings, (80, 80, 100))
+    # 主页面全竖排、间距加大、排版大方（统一宽度 260，竖向间隔 72）
+    mx_btn = WINDOW_WIDTH // 2
+    btn_w, btn_h, gap = 260, 56, 72
+    start_y = 368
+    btn_new_game = Button(mx_btn - btn_w // 2, start_y, btn_w, btn_h, "新游戏", cb_new_game, (0, 100, 150))
+    btn_continue = Button(mx_btn - btn_w // 2, start_y + gap, btn_w, btn_h, "继续游戏", cb_continue_game, (40, 120, 180))
+    btn_level_catalog = Button(mx_btn - btn_w // 2, start_y + gap * 2, btn_w, btn_h, "关卡目录", cb_open_level_catalog, (80, 120, 150))
+    btn_kv = Button(mx_btn - btn_w // 2, start_y + gap * 3, btn_w, btn_h, "失落数据", cb_open_knowledge_menu, (100, 100, 120))
+    btn_settings = Button(mx_btn - btn_w // 2, start_y + gap * 4, btn_w, btn_h, "系统设置", cb_open_settings, (80, 80, 100))
     
     # Settings UI
     # Initialize slider with default volume 0.5 if not set, or get current
@@ -2623,6 +2778,7 @@ def main():
     # Back buttons
     btn_kv_back = Button(WINDOW_WIDTH - 220, WINDOW_HEIGHT - 80, 200, 50, "返回", cb_close_knowledge_menu, (80, 80, 80))
     btn_detail_back = Button(WINDOW_WIDTH - 220, WINDOW_HEIGHT - 80, 200, 50, "返回", cb_back_to_menu, (80, 80, 80))
+    btn_catalog_back = Button(WINDOW_WIDTH - 220, WINDOW_HEIGHT - 80, 200, 50, "返回主菜单", cb_catalog_back, (80, 80, 80))
 
     def cb_open_analysis():
         nonlocal show_analysis
@@ -2679,8 +2835,10 @@ def main():
             play_bgm("ofeliasdream.mp3")
         elif current_state in [STATE_INTRO_1, STATE_INTRO_2]:
             play_bgm(None) # 静音
+        elif current_state == STATE_LEVEL_CATALOG:
+            play_bgm("ofeliasdream.mp3")
 
-        if not level and current_state not in [STATE_CREDITS, STATE_INTRO_1, STATE_INTRO_2]: break
+        if not level and current_state not in [STATE_CREDITS, STATE_INTRO_1, STATE_INTRO_2, STATE_LEVEL_CATALOG]: break
         
         if level:
             # First frame of Level 1 might require None for tutorial reset
@@ -2722,10 +2880,21 @@ def main():
                         cb_skip_intro()
             
             if current_state == STATE_START_SCREEN:
-                btn_start.handle_event(e)
+                btn_new_game.handle_event(e)
+                btn_continue.handle_event(e)
+                btn_level_catalog.handle_event(e)
                 btn_kv.handle_event(e)
                 btn_settings.handle_event(e)
-            
+            elif current_state == STATE_LEVEL_CATALOG:
+                btn_catalog_back.handle_event(e)
+                if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    for rect, idx in g_level_catalog_rects:
+                        if rect.collidepoint(e.pos):
+                            level_mgr.current_level_idx = idx
+                            current_state = STATE_BRIEFING
+                            if level_mgr.get_current_level():
+                                play_bgm(get_level_music(level_mgr.get_current_level().get('id', 0)))
+                            break
             elif current_state == STATE_SETTINGS:
                 if slider_vol.handle_event(e):
                     # Volume changed
@@ -2794,12 +2963,13 @@ def main():
                                 current_code = level.get('available_codes', ["None"])[0]
                             current_state = STATE_BRIEFING
                             break
-                # 第一关教学：误码率步骤中“点击任意处以继续”
-                if e.type == pygame.MOUSEBUTTONDOWN and g_tutorial.active and not is_animating and level:
+                # 第一关教学：误码率步骤中”点击任意处以继续”（点击到”回滚时间”按钮时交给按钮处理，不视为继续）
+                if e.type == pygame.MOUSEBUTTONDOWN and g_tutorial.active and not is_animating and level and not level_complete:
                     tsteps = level.get('tutorial_steps') or []
                     if tsteps and g_tutorial.step < len(tsteps) and tsteps[g_tutorial.step].get('highlight') == 'ber_display' and sim_result is not None:
-                        g_tutorial.completed = True
-                        continue
+                        if not btn_restart_level.rect.collidepoint(e.pos):
+                            g_tutorial.completed = True
+                            continue
                 # 优先处理地图区域内的节点点击（建立链路），避免被按钮逻辑覆盖
                 map_click_consumed = False
                 if e.type == pygame.MOUSEBUTTONDOWN and not is_animating and level:
@@ -2864,8 +3034,9 @@ def main():
 
         # Draw
         if current_state == STATE_START_SCREEN:
-            draw_start_screen(screen, btn_start, btn_kv, btn_settings)
-        
+            draw_start_screen(screen, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings)
+        elif current_state == STATE_LEVEL_CATALOG:
+            draw_level_catalog(screen, level_mgr, g_level_stars, btn_catalog_back)
         elif current_state in [STATE_INTRO_1, STATE_INTRO_2]:
             g_intro_timer += 1
             # 简单的生命周期：Fade In (60帧) -> Hold (120帧) -> Fade Out (60帧)
@@ -3110,28 +3281,36 @@ def main():
             # 背景噪声视觉效果：除第一关外全部开启，或根据是否有节点判定
             if level.get('id') != 1:
                 for _ in range(50):
-                     pygame.draw.circle(screen, (40,50,60), (np.random.randint(0,MAP_WIDTH), np.random.randint(80,800)), 1)
+                     pygame.draw.circle(screen, (40,50,60), (np.random.randint(0,MAP_WIDTH), np.random.randint(105,800)), 1)
 
-            # Header Info
-            pygame.draw.rect(screen, PANEL_COLOR, (0,0,WINDOW_WIDTH,80))
-            screen.blit(header_font.render(f"{level['phase']} : {level['title']}", True, ACCENT_COLOR), (20,15))
-            
-            # Display appropriate SNR info
+            # Header：横线下移，关卡内容整体下移，顶栏加高留白
+            header_h = 100
+            left_x = 20
+            line1_y, line2_y = 18, 48
+            pygame.draw.rect(screen, PANEL_COLOR, (0, 0, WINDOW_WIDTH, header_h))
+            # 左：阶段+标题（第一行），目标 BER | SNR（第二行）
+            phase_title = f"{level['phase']} : {level['title']}"
+            max_title_w = MAP_WIDTH - 320
+            title_surf = header_font.render(phase_title, True, ACCENT_COLOR)
+            if title_surf.get_width() > max_title_w:
+                phase_title = phase_title[:20] + "…" if len(phase_title) > 20 else phase_title
+                title_surf = header_font.render(phase_title, True, ACCENT_COLOR)
+            screen.blit(title_surf, (left_x, line1_y))
             if 'nodes' in level:
                 snr_display = "Varies (Dist)"
                 if sim_result and 'final_snr' in sim_result:
                     snr_display = f"Last Hop {sim_result['final_snr']:.1f}dB"
             else:
                 snr_display = "No noise" if level.get('id') == 1 else f"{level['snr_db']}dB"
-            
-            screen.blit(font.render(f"Target BER < {level['target_ber']} | SNR: {snr_display}", True, (150,150,150)), (20,50))
-            
-            # Energy Display
+            screen.blit(font.render(f"目标 BER < {level['target_ber']}  |  SNR: {snr_display}", True, (150,150,150)), (left_x, line2_y))
+            # 横线再下移，与文字、关卡内容留足间距
+            sep_y = 82
+            pygame.draw.line(screen, (50, 55, 65), (0, sep_y), (MAP_WIDTH, sep_y), 1)
+            # 右：能源 + 回滚按钮
             e_color = (100, 255, 255) if energy > 0 else (255, 50, 50)
-            screen.blit(header_font.render(f"PWR: {energy}/10", True, e_color), (WINDOW_WIDTH - 220, 25))
-            
-            # Restart Button (Move to top right area, inside header or just below)
-            # Coordinates updated in init
+            pwr_surf = font.render(f"PWR: {energy}/10", True, e_color)
+            pwr_x = MAP_WIDTH - 220
+            screen.blit(pwr_surf, (pwr_x, line1_y + 4))
             if level.get('id') != 'HIDDEN_SAT_ARRAY':
                 btn_restart_level.draw(screen)
 
@@ -3476,11 +3655,7 @@ def main():
                         g_tutorial.next()
                     elif highlight == 'send_button' and is_animating:
                         g_tutorial.next()
-                    elif highlight == 'ber_display' and sim_result is not None and not is_animating:
-                        if g_tutorial.step + 1 >= len(tutorial_steps):
-                            g_tutorial.completed = True
-                        else:
-                            g_tutorial.next()
+                    # ber_display 不在此处自动推进，仅通过“点击任意处以继续”在事件中推进，避免显示过快
                 elif tutorial_steps and g_tutorial.step >= len(tutorial_steps):
                     g_tutorial.completed = True
             # -------------------------------------------------------------
