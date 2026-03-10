@@ -20,7 +20,7 @@ def _check_first_contact(stats: Dict[str, Any]) -> bool:
 
 
 def _check_getting_started(stats: Dict[str, Any]) -> bool:
-    return stats.get("levels_completed", 0) >= 3
+    return stats.get("levels_completed", 0) >= 5
 
 
 def _check_halfway_there(stats: Dict[str, Any]) -> bool:
@@ -34,7 +34,8 @@ def _check_mission_complete(stats: Dict[str, Any]) -> bool:
 
 
 def _check_tech_unlocked(stats: Dict[str, Any]) -> bool:
-    return len(stats.get("unlocked_techs", [])) >= 2
+    # 解锁 3 个新技术：默认已拥有 BPSK，因此需要 >=4
+    return len(stats.get("unlocked_techs", [])) >= 4
 
 
 def _check_full_arsenal(stats: Dict[str, Any]) -> bool:
@@ -44,11 +45,11 @@ def _check_full_arsenal(stats: Dict[str, Any]) -> bool:
 
 def _check_perfectionist(stats: Dict[str, Any]) -> bool:
     stars = stats.get("level_stars", {})
-    return max(stars.values(), default=0) >= 3
+    return sum(1 for s in stars.values() if s >= 3) >= 3
 
 
 def _check_triple_crown(stats: Dict[str, Any]) -> bool:
-    return stats.get("consecutive_three_stars", 0) >= 3
+    return stats.get("consecutive_three_stars", 0) >= 5
 
 
 def _check_flawless_victory(stats: Dict[str, Any]) -> bool:
@@ -60,11 +61,11 @@ def _check_flawless_victory(stats: Dict[str, Any]) -> bool:
 
 
 def _check_ultra_low_ber(stats: Dict[str, Any]) -> bool:
-    return stats.get("best_ber", 1.0) < 0.0001
+    return stats.get("best_ber", 1.0) < 0.00001
 
 
 def _check_speed_demon(stats: Dict[str, Any]) -> bool:
-    return stats.get("fastest_time", 999) < 15
+    return stats.get("fastest_time", 999) < 10
 
 
 def _check_high_scorer(stats: Dict[str, Any]) -> bool:
@@ -72,32 +73,32 @@ def _check_high_scorer(stats: Dict[str, Any]) -> bool:
 
 
 def _check_bpsk_master(stats: Dict[str, Any]) -> bool:
-    return stats.get("bpsk_clears", 0) >= 5
+    return stats.get("bpsk_clears", 0) >= 8
 
 
 def _check_qpsk_expert(stats: Dict[str, Any]) -> bool:
-    return stats.get("qpsk_clears", 0) >= 5
+    return stats.get("qpsk_clears", 0) >= 8
 
 
 def _check_high_order_mod(stats: Dict[str, Any]) -> bool:
-    return stats.get("psk8_clears", 0) >= 1
+    return stats.get("8psk_clears", 0) >= 3
 
 
 def _check_coding_theory(stats: Dict[str, Any]) -> bool:
     codes = ["none_clears", "repetition_clears", "hamming_clears", "polar_clears", "ldpc_clears"]
-    return all(stats.get(c, 0) >= 1 for c in codes)
+    return all(stats.get(c, 0) >= 3 for c in codes)
 
 
 def _check_polar_pioneer(stats: Dict[str, Any]) -> bool:
-    return stats.get("polar_clears", 0) >= 1
+    return stats.get("polar_clears", 0) >= 5
 
 
 def _check_ldpc_legend(stats: Dict[str, Any]) -> bool:
-    return stats.get("ldpc_hard_clear", False)
+    return stats.get("ldpc_hard_clears", 0) >= stats.get("total_hard_levels", 3)
 
 
 def _check_minimalist(stats: Dict[str, Any]) -> bool:
-    return stats.get("level_5_no_coding", False)
+    return stats.get("none_clears", 0) >= 5
 
 
 def _check_no_repetition(stats: Dict[str, Any]) -> bool:
@@ -105,11 +106,11 @@ def _check_no_repetition(stats: Dict[str, Any]) -> bool:
 
 
 def _check_low_snr_hero(stats: Dict[str, Any]) -> bool:
-    return stats.get("low_snr_clear", False)
+    return stats.get("low_snr_clears", 0) >= 3
 
 
 def _check_one_shot(stats: Dict[str, Any]) -> bool:
-    return stats.get("first_try_three_star", False)
+    return stats.get("first_try_three_stars", 0) >= 5
 
 
 def _check_comeback_king(stats: Dict[str, Any]) -> bool:
@@ -117,27 +118,27 @@ def _check_comeback_king(stats: Dict[str, Any]) -> bool:
 
 
 def _check_trial_and_error(stats: Dict[str, Any]) -> bool:
-    return stats.get("max_configs_tried", 0) >= 10
+    return stats.get("max_configs_tried", 0) >= 15
 
 
 def _check_veteran(stats: Dict[str, Any]) -> bool:
-    return stats.get("total_playtime", 0) >= 7200
-
-
-def _check_dedicated(stats: Dict[str, Any]) -> bool:
     return stats.get("total_playtime", 0) >= 18000
 
 
+def _check_dedicated(stats: Dict[str, Any]) -> bool:
+    return stats.get("total_playtime", 0) >= 36000
+
+
 def _check_hundred_signals(stats: Dict[str, Any]) -> bool:
-    return stats.get("total_transmissions", 0) >= 100
+    return stats.get("total_transmissions", 0) >= 200
 
 
 def _check_star_collector(stats: Dict[str, Any]) -> bool:
-    return sum(stats.get("level_stars", {}).values()) >= 20
+    return sum(stats.get("level_stars", {}).values()) >= 25
 
 
 def _check_retry_master(stats: Dict[str, Any]) -> bool:
-    return stats.get("total_retries", 0) >= 20
+    return stats.get("total_retries", 0) >= 50
 
 
 def _check_easter_egg(stats: Dict[str, Any]) -> bool:
@@ -149,13 +150,38 @@ def _check_shannon_tribute(stats: Dict[str, Any]) -> bool:
 
 
 def _check_lucky_seven(stats: Dict[str, Any]) -> bool:
-    return stats.get("hamming_clears", 0) >= 7
+    return stats.get("hamming_clears", 0) >= 10
 
 
 def _check_all_rounder(stats: Dict[str, Any]) -> bool:
     tried = len(stats.get("tried_combinations", set()))
     total = stats.get("total_combinations", 999)
     return tried >= total
+
+
+def _check_perfect_streak(stats: Dict[str, Any]) -> bool:
+    return stats.get("perfect_streak", 0) >= 10
+
+
+def _check_tech_versatile(stats: Dict[str, Any]) -> bool:
+    return all(stats.get(k, 0) >= 5 for k in ("bpsk_clears", "qpsk_clears", "8psk_clears"))
+
+
+def _check_hard_mode_clear(stats: Dict[str, Any]) -> bool:
+    return stats.get("hard_mode_completed", 0) >= stats.get("total_hard_levels", 3)
+
+
+def _check_speed_runner(stats: Dict[str, Any]) -> bool:
+    return stats.get("total_clear_time", 999999) < 1800
+
+
+def _check_transmission_expert(stats: Dict[str, Any]) -> bool:
+    return stats.get("total_transmissions", 0) >= 500
+
+
+def _check_perfectionist_plus(stats: Dict[str, Any]) -> bool:
+    total_levels = stats.get("total_levels", 10)
+    return all(stats.get(f"level_{i}_score", 0) >= 200 for i in range(1, total_levels + 1))
 
 
 # 成就定义表：id -> { name, desc, icon, category, hidden, check }
@@ -170,7 +196,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "getting_started": {
         "name": "初窥门径",
-        "desc": "完成前3关",
+        "desc": "完成前5关",
         "icon": "📡",
         "category": CATEGORY_PROGRESS,
         "hidden": False,
@@ -194,7 +220,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "tech_unlocked": {
         "name": "技术解锁",
-        "desc": "解锁第一个新技术",
+        "desc": "解锁3个新技术",
         "icon": "🔓",
         "category": CATEGORY_PROGRESS,
         "hidden": False,
@@ -210,7 +236,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "perfectionist": {
         "name": "完美主义者",
-        "desc": "任意关卡获得三星",
+        "desc": "获得3个三星关卡",
         "icon": "⭐",
         "category": CATEGORY_PERFECTION,
         "hidden": False,
@@ -218,7 +244,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "triple_crown": {
         "name": "三冠王",
-        "desc": "连续3关获得三星",
+        "desc": "连续5关获得三星",
         "icon": "👑",
         "category": CATEGORY_PERFECTION,
         "hidden": False,
@@ -234,7 +260,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "ultra_low_ber": {
         "name": "超低误码",
-        "desc": "达成BER < 0.0001",
+        "desc": "达成BER < 0.00001",
         "icon": "📉",
         "category": CATEGORY_PERFECTION,
         "hidden": False,
@@ -242,7 +268,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "speed_demon": {
         "name": "速度恶魔",
-        "desc": "15秒内完成关卡",
+        "desc": "10秒内完成关卡",
         "icon": "⚡",
         "category": CATEGORY_PERFECTION,
         "hidden": False,
@@ -256,9 +282,17 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "hidden": False,
         "check": _check_high_scorer,
     },
+    "perfect_streak": {
+        "name": "完美连胜",
+        "desc": "连续10关首次通关",
+        "icon": "🔥",
+        "category": CATEGORY_PERFECTION,
+        "hidden": False,
+        "check": _check_perfect_streak,
+    },
     "bpsk_master": {
         "name": "BPSK大师",
-        "desc": "使用BPSK完成5关",
+        "desc": "使用BPSK完成8关",
         "icon": "🎓",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
@@ -266,7 +300,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "qpsk_expert": {
         "name": "QPSK专家",
-        "desc": "使用QPSK完成5关",
+        "desc": "使用QPSK完成8关",
         "icon": "🔬",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
@@ -274,7 +308,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "high_order_mod": {
         "name": "高阶调制",
-        "desc": "使用8PSK完成关卡",
+        "desc": "使用8PSK完成3关",
         "icon": "📶",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
@@ -282,7 +316,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "coding_theory": {
         "name": "编码理论家",
-        "desc": "使用所有编码各完成1关",
+        "desc": "使用所有编码各完成3关",
         "icon": "📚",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
@@ -290,7 +324,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "polar_pioneer": {
         "name": "Polar先驱",
-        "desc": "首次使用Polar码",
+        "desc": "使用Polar码完成5关",
         "icon": "🧊",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
@@ -298,15 +332,23 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "ldpc_legend": {
         "name": "LDPC传奇",
-        "desc": "使用LDPC完成困难关卡",
+        "desc": "使用LDPC完成所有困难关卡",
         "icon": "🌟",
         "category": CATEGORY_TECHNICAL,
         "hidden": False,
         "check": _check_ldpc_legend,
     },
+    "tech_versatile": {
+        "name": "技术全才",
+        "desc": "每种调制至少完成5关",
+        "icon": "🎨",
+        "category": CATEGORY_TECHNICAL,
+        "hidden": False,
+        "check": _check_tech_versatile,
+    },
     "minimalist": {
         "name": "极简主义",
-        "desc": "不使用编码完成关卡5",
+        "desc": "不使用编码完成5关",
         "icon": "🎯",
         "category": CATEGORY_CHALLENGE,
         "hidden": False,
@@ -322,7 +364,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "low_snr_hero": {
         "name": "低信噪比英雄",
-        "desc": "在SNR<0dB下完成关卡",
+        "desc": "在SNR<0dB下完成3关",
         "icon": "💪",
         "category": CATEGORY_CHALLENGE,
         "hidden": False,
@@ -330,7 +372,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "one_shot": {
         "name": "一击必杀",
-        "desc": "首次尝试即三星通关",
+        "desc": "首次尝试即三星通关5关",
         "icon": "🎲",
         "category": CATEGORY_CHALLENGE,
         "hidden": False,
@@ -338,7 +380,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "comeback_king": {
         "name": "逆转之王",
-        "desc": "失败5次后成功通关",
+        "desc": "失败10次后成功通关",
         "icon": "🔄",
         "category": CATEGORY_CHALLENGE,
         "hidden": False,
@@ -346,15 +388,31 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "trial_and_error": {
         "name": "试错精神",
-        "desc": "同一关卡尝试10种配置",
+        "desc": "同一关卡尝试15种配置",
         "icon": "🧪",
         "category": CATEGORY_CHALLENGE,
         "hidden": False,
         "check": _check_trial_and_error,
     },
+    "hard_mode_clear": {
+        "name": "困难模式征服者",
+        "desc": "完成所有困难模式关卡",
+        "icon": "💀",
+        "category": CATEGORY_CHALLENGE,
+        "hidden": False,
+        "check": _check_hard_mode_clear,
+    },
+    "speed_runner": {
+        "name": "速通玩家",
+        "desc": "30分钟内通关所有关卡",
+        "icon": "🏃",
+        "category": CATEGORY_CHALLENGE,
+        "hidden": False,
+        "check": _check_speed_runner,
+    },
     "veteran": {
         "name": "老兵",
-        "desc": "游戏时长达到2小时",
+        "desc": "游戏时长达到5小时",
         "icon": "🎖️",
         "category": CATEGORY_STATISTICS,
         "hidden": False,
@@ -362,7 +420,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "dedicated": {
         "name": "专注玩家",
-        "desc": "游戏时长达到5小时",
+        "desc": "游戏时长达到10小时",
         "icon": "⏰",
         "category": CATEGORY_STATISTICS,
         "hidden": False,
@@ -370,7 +428,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "hundred_signals": {
         "name": "百次传输",
-        "desc": "发送100次信号",
+        "desc": "发送200次信号",
         "icon": "📊",
         "category": CATEGORY_STATISTICS,
         "hidden": False,
@@ -378,7 +436,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "star_collector": {
         "name": "星星收集者",
-        "desc": "累计获得20颗星",
+        "desc": "累计获得25颗星",
         "icon": "✨",
         "category": CATEGORY_STATISTICS,
         "hidden": False,
@@ -386,11 +444,19 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "retry_master": {
         "name": "重试大师",
-        "desc": "重玩关卡20次",
+        "desc": "重玩关卡50次",
         "icon": "🔁",
         "category": CATEGORY_STATISTICS,
         "hidden": False,
         "check": _check_retry_master,
+    },
+    "transmission_expert": {
+        "name": "传输专家",
+        "desc": "发送500次信号",
+        "icon": "📡",
+        "category": CATEGORY_STATISTICS,
+        "hidden": False,
+        "check": _check_transmission_expert,
     },
     "easter_egg": {
         "name": "彩蛋发现者",
@@ -410,7 +476,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "lucky_seven": {
         "name": "幸运七",
-        "desc": "使用Hamming(7,4)完成7关",
+        "desc": "使用Hamming(7,4)完成10关",
         "icon": "🍀",
         "category": CATEGORY_HIDDEN,
         "hidden": True,
@@ -418,11 +484,19 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
     },
     "all_rounder": {
         "name": "全能选手",
-        "desc": "每种技术组合都尝试过",
+        "desc": "尝试所有技术组合",
         "icon": "🌈",
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_all_rounder,
+    },
+    "perfectionist_plus": {
+        "name": "完美主义者+",
+        "desc": "所有关卡满分",
+        "icon": "💯",
+        "category": CATEGORY_HIDDEN,
+        "hidden": True,
+        "check": _check_perfectionist_plus,
     },
 }
 

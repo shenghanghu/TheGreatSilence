@@ -107,7 +107,7 @@ SAVE_FILE = "save.json"
 
 def _default_game_stats():
     """成就系统所需的默认游戏统计结构（成就.md 3.3）"""
-    return {
+    base = {
         "levels_completed": 0,
         "total_levels": 11,
         "level_stars": {},
@@ -117,21 +117,24 @@ def _default_game_stats():
         "fastest_time": 999,
         "highest_score": 0,
         "consecutive_three_stars": 0,
+        "perfect_streak": 0,
         "bpsk_clears": 0,
         "qpsk_clears": 0,
-        "psk8_clears": 0,
+        "8psk_clears": 0,
         "none_clears": 0,
         "repetition_clears": 0,
         "hamming_clears": 0,
         "polar_clears": 0,
         "ldpc_clears": 0,
-        "level_5_no_coding": False,
         "no_repetition_full_clear": False,
-        "low_snr_clear": False,
-        "first_try_three_star": False,
+        "low_snr_clears": 0,
+        "first_try_three_stars": 0,
         "comeback_achieved": False,
         "max_configs_tried": 0,
-        "ldpc_hard_clear": False,
+        "ldpc_hard_clears": 0,
+        "total_hard_levels": 3,
+        "hard_mode_completed": 0,
+        "total_clear_time": 0,
         "total_playtime": 0,
         "total_transmissions": 0,
         "total_retries": 0,
@@ -140,8 +143,12 @@ def _default_game_stats():
         "tried_combinations": [],
         "total_combinations": 40,
         "level_fail_count": {},
-        "level_first_try": {},
+        "level_first_try": {},  # {level_id(str): bool} 仅当“第一次挑战且未失败”才为 True
     }
+    # 关卡分数记录（成就.md：perfectionist_plus 使用 level_{i}_score）
+    for i in range(1, 12):
+        base[f"level_{i}_score"] = 0
+    return base
 
 # 全局成就与统计（在 main() 中加载后使用）
 g_game_stats = _default_game_stats()
@@ -210,14 +217,28 @@ def build_stats_for_achievements(level_mgr, level_stars, levels_completed, game_
             all_techs.update(lv.get("available_mods", []))
             all_techs.update(lv.get("available_codes", ["None"]))
     total_techs = len(all_techs) if all_techs else 8
-    # 连续三星：从关卡1开始数连续三星数量
+    # 连续三星：计算“最大连续三星段”（用于 triple_crown）
     stars_list = [level_stars.get(i, 0) for i in range(1, total_levels + 1)]
     consecutive = 0
+    max_consecutive = 0
     for s in stars_list:
         if s >= 3:
             consecutive += 1
+            max_consecutive = max(max_consecutive, consecutive)
         else:
             consecutive = 0
+
+    # 首次通关连胜：计算“最大连续首次通关段”（用于 perfect_streak）
+    first_try_map = game_stats.get("level_first_try", {}) or {}
+    streak = 0
+    max_streak = 0
+    for i in range(1, total_levels + 1):
+        key = str(i)
+        if first_try_map.get(key, False):
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
     return {
         "levels_completed": levels_completed,
         "total_levels": total_levels,
@@ -227,19 +248,22 @@ def build_stats_for_achievements(level_mgr, level_stars, levels_completed, game_
         "best_ber": game_stats.get("best_ber", 1.0),
         "fastest_time": game_stats.get("fastest_time", 999),
         "highest_score": game_stats.get("highest_score", 0),
-        "consecutive_three_stars": max(consecutive, game_stats.get("consecutive_three_stars", 0)),
+        "consecutive_three_stars": max(max_consecutive, game_stats.get("consecutive_three_stars", 0)),
+        "perfect_streak": max(max_streak, game_stats.get("perfect_streak", 0)),
         **{k: game_stats.get(k, 0) for k in (
-            "bpsk_clears", "qpsk_clears", "psk8_clears", "none_clears", "repetition_clears",
+            "bpsk_clears", "qpsk_clears", "8psk_clears", "none_clears", "repetition_clears",
             "hamming_clears", "polar_clears", "ldpc_clears", "max_configs_tried",
-            "total_playtime", "total_transmissions", "total_retries"
+            "total_playtime", "total_transmissions", "total_retries", "low_snr_clears",
+            "first_try_three_stars", "ldpc_hard_clears", "total_hard_levels",
+            "hard_mode_completed", "total_clear_time"
         )},
         **{k: game_stats.get(k, False) for k in (
-            "level_5_no_coding", "no_repetition_full_clear", "low_snr_clear",
-            "first_try_three_star", "comeback_achieved", "ldpc_hard_clear",
+            "no_repetition_full_clear", "comeback_achieved",
             "easter_egg_found", "shannon_limit_reached"
         )},
         "tried_combinations": game_stats.get("tried_combinations", []),
         "total_combinations": game_stats.get("total_combinations", 40),
+        **{f"level_{i}_score": game_stats.get(f"level_{i}_score", 0) for i in range(1, total_levels + 1)},
     }
 
 
@@ -2065,6 +2089,14 @@ def main():
         lvl = level_mgr.get_current_level()
         if not lvl:
             return
+        # 首次通关判定：进入关卡时若从未记录，则默认“首次挑战仍成立”
+        if isinstance(lvl.get("id"), int):
+            key = str(lvl.get("id"))
+            global g_game_stats
+            ft = g_game_stats.get("level_first_try", {}) or {}
+            if key not in ft:
+                ft[key] = True
+            g_game_stats["level_first_try"] = ft
 
         # 第一关教学：不预设调制，让玩家按教程步骤点击 BPSK，避免该步被直接跳过；编码固定为 None（第一关无编码选项）
         if lvl.get('id') == 1:
@@ -2748,11 +2780,25 @@ def main():
                 rx_msg = f"SUCCESS! {good_sat_count} Good Node(s) Identified."
             else:
                 passed = False 
+
+        # 失败统计（用于 comeback_king / perfect_streak 等成就）
+        level_id = level.get('id')
+        if not passed and isinstance(level_id, int):
+            key = str(level_id)
+            global g_game_stats
+            fails = g_game_stats.get("level_fail_count", {}) or {}
+            fails[key] = int(fails.get(key, 0)) + 1
+            g_game_stats["level_fail_count"] = fails
+            # 只要第一次挑战过程中出现失败，就不算“首次通关”
+            ft = g_game_stats.get("level_first_try", {}) or {}
+            if key not in ft:
+                ft[key] = True
+            ft[key] = False
+            g_game_stats["level_first_try"] = ft
         
         if passed: 
             level_complete = True
             # 三星评价 (2.2)：计算并保存星级
-            level_id = level.get('id')
             if isinstance(level_id, int):
                 thresholds = level.get('star_thresholds', {})
                 stars = calculate_stars(ber, thresholds)
@@ -2760,11 +2806,9 @@ def main():
                 g_level_stars[level_id] = max(g_level_stars.get(level_id, 0), stars)
                 # 阶段三 3.1/3.2：更新游戏统计、评分、成就
                 time_spent = (pygame.time.get_ticks() - g_level_start_time) / 1000.0
-                mod_key = (current_mod or "").replace("(", "").replace(")", "").strip()
                 if "BPSK" in (current_mod or ""): g_game_stats["bpsk_clears"] = g_game_stats.get("bpsk_clears", 0) + 1
                 if "QPSK" in (current_mod or ""): g_game_stats["qpsk_clears"] = g_game_stats.get("qpsk_clears", 0) + 1
-                if "8PSK" in (current_mod or ""): g_game_stats["psk8_clears"] = g_game_stats.get("psk8_clears", 0) + 1
-                code_key = (current_code or "None").lower()
+                if "8PSK" in (current_mod or ""): g_game_stats["8psk_clears"] = g_game_stats.get("8psk_clears", 0) + 1
                 if current_code is None or current_code == "None": g_game_stats["none_clears"] = g_game_stats.get("none_clears", 0) + 1
                 elif "Repetition" in (current_code or ""): g_game_stats["repetition_clears"] = g_game_stats.get("repetition_clears", 0) + 1
                 elif "Hamming" in (current_code or ""): g_game_stats["hamming_clears"] = g_game_stats.get("hamming_clears", 0) + 1
@@ -2772,12 +2816,27 @@ def main():
                 elif "LDPC" in (current_code or ""): g_game_stats["ldpc_clears"] = g_game_stats.get("ldpc_clears", 0) + 1
                 g_game_stats["best_ber"] = min(g_game_stats.get("best_ber", 1.0), ber)
                 g_game_stats["fastest_time"] = min(g_game_stats.get("fastest_time", 999), time_spent)
-                if level_id == 5 and (not current_code or current_code == "None"):
-                    g_game_stats["level_5_no_coding"] = True
                 if level.get("snr_db", 10) < 0:
-                    g_game_stats["low_snr_clear"] = True
+                    g_game_stats["low_snr_clears"] = g_game_stats.get("low_snr_clears", 0) + 1
                 total_score, score_breakdown, grade = calculate_score(ber, level.get("target_ber", 0.01), time_spent, (current_mod, current_code), level_id)
                 g_game_stats["highest_score"] = max(g_game_stats.get("highest_score", 0), total_score)
+                g_game_stats["total_clear_time"] = g_game_stats.get("total_clear_time", 0) + time_spent
+                # 每关分数记录（perfectionist_plus）
+                g_game_stats[f"level_{level_id}_score"] = max(g_game_stats.get(f"level_{level_id}_score", 0), total_score)
+                # 首次通关/首次三星统计
+                key = str(level_id)
+                ft = g_game_stats.get("level_first_try", {}) or {}
+                if key not in ft:
+                    ft[key] = True
+                first_try_success = bool(ft.get(key, False)) and int((g_game_stats.get("level_fail_count", {}) or {}).get(key, 0)) == 0
+                if first_try_success and stars >= 3:
+                    g_game_stats["first_try_three_stars"] = g_game_stats.get("first_try_three_stars", 0) + 1
+                # 逆转之王：同关卡失败 >=10 后成功
+                if int((g_game_stats.get("level_fail_count", {}) or {}).get(key, 0)) >= 10:
+                    g_game_stats["comeback_achieved"] = True
+                # 首次通关标记：仅当没有失败并首次成功时保持 True
+                ft[key] = first_try_success
+                g_game_stats["level_first_try"] = ft
                 levels_completed = level_mgr.current_level_idx + 1
                 full_stats = build_stats_for_achievements(level_mgr, g_level_stars, levels_completed, g_game_stats)
                 newly = g_achievement_manager.check_achievements(full_stats)
@@ -3035,7 +3094,8 @@ def main():
     btn_settings = Button(mx_btn - btn_w // 2, start_y + gap * 4, btn_w, btn_h, "系统设置", cb_open_settings, (80, 80, 100))
     
     def cb_open_achievements():
-        global current_state
+        global current_state, g_achievement_scroll_y
+        g_achievement_scroll_y = 0
         current_state = STATE_ACHIEVEMENTS
     def cb_back_from_achievements():
         global current_state
