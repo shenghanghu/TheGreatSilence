@@ -5,6 +5,8 @@ import numpy as np
 import os # 新增
 from dsp_engine import DSPEngine as dsp
 from levels import LevelManager
+from achievements import AchievementManager, ACHIEVEMENTS, CATEGORY_NAMES
+from tech_tree import draw_tech_tree_screen
 
 # --- 初始化 ---
 pygame.init()
@@ -98,23 +100,78 @@ STATE_LETTER_VIEW = 10 # 新增信件展示状态
 STATE_INTRO_1 = 11 # 新增开场 1: HOPE IS A WAVEFORM
 STATE_INTRO_2 = 12 # 新增开场 2: IS ANYONE OUT THERE?
 STATE_LEVEL_CATALOG = 13 # 关卡目录（选择关卡）
+STATE_ACHIEVEMENTS = 14 # 成就界面（阶段三 3.1）
 
 # --- 存档路径 ---
 SAVE_FILE = "save.json"
 
-def save_progress(level_idx, stars_dict):
-    """将当前关卡进度与星级写入存档"""
+def _default_game_stats():
+    """成就系统所需的默认游戏统计结构（成就.md 3.3）"""
+    return {
+        "levels_completed": 0,
+        "total_levels": 11,
+        "level_stars": {},
+        "unlocked_techs": ["BPSK"],
+        "total_techs": 8,
+        "best_ber": 1.0,
+        "fastest_time": 999,
+        "highest_score": 0,
+        "consecutive_three_stars": 0,
+        "bpsk_clears": 0,
+        "qpsk_clears": 0,
+        "psk8_clears": 0,
+        "none_clears": 0,
+        "repetition_clears": 0,
+        "hamming_clears": 0,
+        "polar_clears": 0,
+        "ldpc_clears": 0,
+        "level_5_no_coding": False,
+        "no_repetition_full_clear": False,
+        "low_snr_clear": False,
+        "first_try_three_star": False,
+        "comeback_achieved": False,
+        "max_configs_tried": 0,
+        "ldpc_hard_clear": False,
+        "total_playtime": 0,
+        "total_transmissions": 0,
+        "total_retries": 0,
+        "easter_egg_found": False,
+        "shannon_limit_reached": False,
+        "tried_combinations": [],
+        "total_combinations": 40,
+        "level_fail_count": {},
+        "level_first_try": {},
+    }
+
+# 全局成就与统计（在 main() 中加载后使用）
+g_game_stats = _default_game_stats()
+g_achievement_manager = AchievementManager()
+g_achievement_popup_queue = []  # 待显示的成就 id 列表
+g_level_start_time = 0  # 进入关卡时的 ticks，用于计算用时
+
+def save_progress(level_idx, stars_dict, game_stats=None, achievements_list=None):
+    """将关卡进度、星级、游戏统计与成就写入存档（阶段三 3.1）"""
     try:
         import json
         path = resource_path(SAVE_FILE)
-        data = {"current_level_idx": level_idx, "level_stars": stars_dict}
+        data = {
+            "current_level_idx": level_idx,
+            "level_stars": stars_dict,
+        }
+        if game_stats is not None:
+            s = dict(game_stats)
+            if "tried_combinations" in s and hasattr(s["tried_combinations"], "__iter__") and not isinstance(s["tried_combinations"], list):
+                s["tried_combinations"] = list(s["tried_combinations"])
+            data["game_stats"] = s
+        if achievements_list is not None:
+            data["achievements"] = achievements_list
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=0)
     except Exception as e:
         print(f"Save failed: {e}")
 
 def load_progress():
-    """从存档读取关卡进度与星级，返回 (level_idx, stars_dict) 或 None"""
+    """从存档读取进度、星级、游戏统计与成就；返回 (level_idx, stars_dict, game_stats, achievements_list) 或 None"""
     try:
         import json
         path = resource_path(SAVE_FILE)
@@ -122,10 +179,100 @@ def load_progress():
             return None
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return (data.get("current_level_idx", 0), data.get("level_stars", {}))
+        level_idx = data.get("current_level_idx", 0)
+        stars_dict = data.get("level_stars", {})
+        game_stats = data.get("game_stats")
+        achievements_list = data.get("achievements")
+        return (level_idx, stars_dict, game_stats, achievements_list)
     except Exception as e:
         print(f"Load failed: {e}")
         return None
+
+
+def build_stats_for_achievements(level_mgr, level_stars, levels_completed, game_stats):
+    """构建成就检测用的完整 stats 字典（成就.md 3.3）。"""
+    total_levels = len([l for l in level_mgr.levels if isinstance(l.get("id"), int)])
+    unlocked_techs = []
+    for i in range(min(levels_completed + 1, len(level_mgr.levels))):
+        lv = level_mgr.levels[i]
+        unlocked_techs.extend(lv.get("available_mods", []))
+        unlocked_techs.extend(lv.get("available_codes", ["None"]))
+    unlocked_techs = list(dict.fromkeys(unlocked_techs))
+    all_techs = set()
+    for lv in level_mgr.levels:
+        if isinstance(lv.get("id"), int):
+            all_techs.update(lv.get("available_mods", []))
+            all_techs.update(lv.get("available_codes", ["None"]))
+    total_techs = len(all_techs) if all_techs else 8
+    # 连续三星：从关卡1开始数连续三星数量
+    stars_list = [level_stars.get(i, 0) for i in range(1, total_levels + 1)]
+    consecutive = 0
+    for s in stars_list:
+        if s >= 3:
+            consecutive += 1
+        else:
+            consecutive = 0
+    return {
+        "levels_completed": levels_completed,
+        "total_levels": total_levels,
+        "level_stars": level_stars,
+        "unlocked_techs": unlocked_techs,
+        "total_techs": total_techs,
+        "best_ber": game_stats.get("best_ber", 1.0),
+        "fastest_time": game_stats.get("fastest_time", 999),
+        "highest_score": game_stats.get("highest_score", 0),
+        "consecutive_three_stars": max(consecutive, game_stats.get("consecutive_three_stars", 0)),
+        **{k: game_stats.get(k, 0) for k in (
+            "bpsk_clears", "qpsk_clears", "psk8_clears", "none_clears", "repetition_clears",
+            "hamming_clears", "polar_clears", "ldpc_clears", "max_configs_tried",
+            "total_playtime", "total_transmissions", "total_retries"
+        )},
+        **{k: game_stats.get(k, False) for k in (
+            "level_5_no_coding", "no_repetition_full_clear", "low_snr_clear",
+            "first_try_three_star", "comeback_achieved", "ldpc_hard_clear",
+            "easter_egg_found", "shannon_limit_reached"
+        )},
+        "tried_combinations": game_stats.get("tried_combinations", []),
+        "total_combinations": game_stats.get("total_combinations", 40),
+    }
+
+
+def calculate_score(ber, target_ber, time_spent, tech_used, level_id):
+    """关卡评分详情（阶段三 3.2）：基础分+BER奖励+速度奖励+技术奖励，返回 (总分, 明细, 评级)。"""
+    score = 0
+    breakdown = []
+    if target_ber > 0 and ber < target_ber:
+        score += 100
+        breakdown.append(("任务完成", 100))
+    ber_ratio = (ber / target_ber) if target_ber > 0 else 0
+    if ber_ratio < 0.1:
+        score += 50
+        breakdown.append(("误码率优秀", 50))
+    elif ber_ratio < 0.5:
+        score += 30
+        breakdown.append(("误码率良好", 30))
+    elif ber_ratio < 0.8:
+        score += 10
+        breakdown.append(("误码率合格", 10))
+    if time_spent < 15:
+        score += 30
+        breakdown.append(("快速完成", 30))
+    elif time_spent < 30:
+        score += 15
+        breakdown.append(("较快完成", 15))
+    # 技术选择奖励（简化：使用推荐技术即加分）
+    score += 20
+    breakdown.append(("技术选择", 20))
+    total = min(200, score)
+    if total >= 200:
+        grade = "S"
+    elif total >= 150:
+        grade = "A"
+    elif total >= 100:
+        grade = "B"
+    else:
+        grade = "C"
+    return total, breakdown, grade
 
 # --- 音乐管理 ---
 current_bgm = None
@@ -840,7 +987,7 @@ def _update_draw_start_stars(surface):
         color = (r, g, b)
         pygame.draw.circle(surface, color, (int(s['x']), int(s['y'])), s['size'])
 
-def draw_start_screen(surface, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings):
+def draw_start_screen(surface, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings, btn_achievements=None):
     surface.fill(BG_COLOR)
     _update_draw_start_stars(surface)
     
@@ -862,6 +1009,9 @@ def draw_start_screen(surface, btn_new_game, btn_continue, btn_level_catalog, bt
     btn_level_catalog.draw(surface)
     btn_kv.draw(surface)
     btn_settings.draw(surface)
+    # 阶段三 3.1：成就入口放在左下角
+    if btn_achievements:
+        btn_achievements.draw(surface)
 
 def draw_intro_screen(surface, text, color, alpha):
     surface.fill((0, 0, 0)) # 纯黑背景
@@ -1430,87 +1580,37 @@ def draw_conclusion_screen(surface, level_id, btn):
     
     btn.draw(surface)
 
-# --- Knowledge Base Logic ---
+# --- Knowledge Base Logic（阶段三 3.3 改为技能树）---
 g_knowledge_ui_rects = []
+g_tech_tree_rects = []  # 技能树节点 [(rect, node_data), ...]
 
 def build_knowledge_db(level_mgr):
+    """仍用于详情页回退时保留列表；技能树从 level_mgr 直接构建。"""
     global g_knowledge_list
     g_knowledge_list = []
-    
     seen_titles = set()
-    
     def add_item(title, text, image, unlocked=True, original_level_id=0):
         if title in seen_titles: return
         seen_titles.add(title)
-        g_knowledge_list.append({
-            'title': title,
-            'text': text,
-            'image': image,
-            'unlocked': unlocked,
-            'level_id': original_level_id
-        })
-
-    # Scan Levels
+        g_knowledge_list.append({'title': title, 'text': text, 'image': image, 'unlocked': unlocked, 'level_id': original_level_id})
     for lvl in level_mgr.levels:
-        # 1. Tutorial Slides
         if 'tutorial_slides' in lvl:
             for s in lvl['tutorial_slides']:
                 add_item(s['title'], s['text'], s.get('image'), True, lvl.get('id', 0))
-                
-        # 2. Tech Unlock Info
         if 'tech_unlock_info' in lvl:
             t = lvl['tech_unlock_info']
-            # Combine intro and specs for detail view
             full_text = t['intro'] + "\n\n" + t['specs']
             add_item(t['title'], full_text, t.get('image'), True, lvl.get('id', 0))
 
-def draw_knowledge_menu(surface, btn_back):
-    surface.fill(BG_COLOR)
-    
-    # Title
-    t_surf = header_font.render("失落数据 (DATA LOGS)", True, ACCENT_COLOR)
-    surface.blit(t_surf, (WINDOW_WIDTH//2 - t_surf.get_width()//2, 40))
-    
-    # Grid
-    global g_knowledge_ui_rects
-    g_knowledge_ui_rects = []
-    
-    start_x, start_y = 100, 120
-    col_w, row_h = 350, 100
-    gap_x, gap_y = 30, 20
-    cols = 3
-    
-    for i, item in enumerate(g_knowledge_list):
-        r = i // cols
-        c = i % cols
-        
-        x = start_x + c * (col_w + gap_x)
-        y = start_y + r * (row_h + gap_y)
-        
-        rect = pygame.Rect(x, y, col_w, row_h)
-        g_knowledge_ui_rects.append((rect, item))
-        
-        # Draw Card
-        hover = rect.collidepoint(pygame.mouse.get_pos())
-        color = (40, 50, 60) if hover else (30, 35, 40)
-        border = (100, 200, 255) if hover else (60, 70, 80)
-        
-        pygame.draw.rect(surface, color, rect, border_radius=8)
-        pygame.draw.rect(surface, border, rect, 1, border_radius=8)
-        
-        # Text
-        # Truncate title if too long
-        title = item['title']
-        if len(title) > 20: title = title[:18] + "..."
-        
-        t_card = font.render(title, True, (220, 220, 220))
-        surface.blit(t_card, (x + 15, y + 35))
-        
-        # Icon placeholder (if image exists)
-        if item.get('image'):
-             pygame.draw.rect(surface, (50, 150, 150), (x + col_w - 40, y + 35, 20, 20), 1)
-
-    btn_back.draw(surface)
+def draw_knowledge_menu(surface, btn_back, level_mgr, current_level_idx):
+    """阶段三 3.3：相关知识页面改为技能树。"""
+    global g_tech_tree_rects
+    g_tech_tree_rects = draw_tech_tree_screen(
+        surface, level_mgr, current_level_idx, btn_back,
+        font, header_font, label_font,
+        accent_color=ACCENT_COLOR, bg_color=BG_COLOR, text_color=TEXT_COLOR,
+        width=WINDOW_WIDTH, height=WINDOW_HEIGHT,
+    )
 
 def draw_knowledge_detail(surface, btn_back):
     surface.fill(BG_COLOR)
@@ -1562,6 +1662,80 @@ def draw_knowledge_detail(surface, btn_back):
     render_text_wrapped(surface, content, (box_x + 40, curr_y), box_width - 80, desc_font, TEXT_COLOR)
 
     btn_back.draw(surface)
+
+
+# --- 阶段三 3.1 成就弹窗与成就列表界面 ---
+def draw_achievement_popup(surface, ach_id, font_obj, header_font_obj):
+    """绘制单条成就解锁弹窗（居中，半透明遮罩）。"""
+    ach = g_achievement_manager.get_achievement(ach_id)
+    if not ach:
+        return
+    # 遮罩
+    overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    surface.blit(overlay, (0, 0))
+    # 卡片
+    card_w, card_h = 400, 220
+    cx, cy = WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2
+    card = pygame.Rect(cx - card_w // 2, cy - card_h // 2, card_w, card_h)
+    s = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    s.fill((25, 30, 40, 250))
+    pygame.draw.rect(s, ACCENT_COLOR, s.get_rect(), 2, border_radius=12)
+    surface.blit(s, card)
+    # 标题
+    title_surf = header_font_obj.render("成就解锁！", True, (255, 200, 50))
+    surface.blit(title_surf, (cx - title_surf.get_width() // 2, card.y + 20))
+    # 图标 + 名称
+    icon_surf = font_obj.render(ach["icon"] + " " + ach["name"], True, (255, 255, 255))
+    surface.blit(icon_surf, (cx - icon_surf.get_width() // 2, card.y + 70))
+    # 描述
+    desc_surf = font_obj.render(ach["desc"], True, (180, 200, 220))
+    surface.blit(desc_surf, (cx - desc_surf.get_width() // 2, card.y + 110))
+    hint = font_obj.render("点击任意处继续", True, (120, 140, 160))
+    surface.blit(hint, (cx - hint.get_width() // 2, card.bottom - 40))
+
+
+def draw_achievements_screen(surface, btn_back):
+    """成就列表界面：分类、进度条、已解锁/未解锁列表。"""
+    surface.fill(BG_COLOR)
+    unlocked_count, total_count = g_achievement_manager.get_progress()
+    # 标题与进度
+    t_surf = header_font.render("成就系统", True, ACCENT_COLOR)
+    surface.blit(t_surf, (WINDOW_WIDTH // 2 - t_surf.get_width() // 2, 30))
+    prog_str = f"进度: {unlocked_count} / {total_count}"
+    surface.blit(font.render(prog_str, True, TEXT_COLOR), (WINDOW_WIDTH // 2 - 80, 75))
+    # 进度条
+    bar_w = 400
+    bar_x = WINDOW_WIDTH // 2 - bar_w // 2
+    pygame.draw.rect(surface, (40, 45, 55), (bar_x, 105, bar_w, 18), border_radius=4)
+    pct = unlocked_count / total_count if total_count else 0
+    pygame.draw.rect(surface, ACCENT_COLOR, (bar_x, 105, int(bar_w * pct), 18), border_radius=4)
+    pygame.draw.rect(surface, (60, 70, 85), (bar_x, 105, bar_w, 18), 1, border_radius=4)
+    # 分类列表
+    y = 140
+    for category, cat_name in CATEGORY_NAMES.items():
+        items = g_achievement_manager.get_by_category(category)
+        if not items:
+            continue
+        surface.blit(font.render(cat_name, True, (150, 180, 220)), (80, y))
+        y += 28
+        for ach_id, ach_data in items.items():
+            unlocked = ach_id in g_achievement_manager.unlocked
+            name = ach_data["name"] if unlocked or not ach_data.get("hidden") else "???"
+            desc = ach_data["desc"] if unlocked or not ach_data.get("hidden") else "???"
+            icon = ach_data["icon"] if unlocked or not ach_data.get("hidden") else "🔒"
+            color = (220, 220, 220) if unlocked else (120, 120, 130)
+            r = pygame.Rect(80, y, WINDOW_WIDTH - 160, 56)
+            pygame.draw.rect(surface, (28, 32, 40), r, border_radius=6)
+            pygame.draw.rect(surface, (50, 60, 75), r, 1, border_radius=6)
+            surface.blit(font.render(f"{icon} {name}", True, color), (100, y + 8))
+            surface.blit(label_font.render(desc, True, (150, 160, 170)), (100, y + 32))
+            status = "已解锁" if unlocked else "未解锁"
+            surface.blit(label_font.render(status, True, (100, 200, 120) if unlocked else (100, 100, 110)), (r.right - 90, y + 18))
+            y += 62
+        y += 12
+    btn_back.draw(surface)
+
 
 # --- Hidden Level Logic ---
 def generate_hidden_satellite_level():
@@ -1713,11 +1887,20 @@ def draw_ghost_cube(surface):
 def main():
     global current_state, previous_state, g_letter_scroll_idx, g_intro_alpha, g_intro_timer, g_level_stars
     
-    # 加载存档（关卡进度与星级）
+    # 加载存档（关卡进度、星级、游戏统计、成就）
+    global g_game_stats, g_achievement_manager
     loaded = load_progress()
     if loaded:
         level_mgr.current_level_idx = min(loaded[0], len(level_mgr.levels) - 1)
         g_level_stars = loaded[1] if isinstance(loaded[1], dict) else {}
+        if loaded[2] is not None and isinstance(loaded[2], dict):
+            def_stats = _default_game_stats()
+            def_stats.update(loaded[2])
+            if "tried_combinations" in loaded[2] and isinstance(loaded[2]["tried_combinations"], list):
+                def_stats["tried_combinations"] = loaded[2]["tried_combinations"]
+            g_game_stats.update(def_stats)
+        if loaded[3] is not None:
+            g_achievement_manager.load(loaded[3])
     
     current_mod = "BPSK"
     current_code = "None"
@@ -1756,8 +1939,10 @@ def main():
 
     def cb_new_game():
         """新游戏：覆盖存档并从第一关开场开始"""
-        global current_state, g_intro_alpha, g_intro_timer, g_level_stars
-        save_progress(0, {})
+        global current_state, g_intro_alpha, g_intro_timer, g_level_stars, g_game_stats, g_achievement_manager
+        g_game_stats = _default_game_stats()
+        g_achievement_manager.unlocked.clear()
+        save_progress(0, {}, g_game_stats, g_achievement_manager.save())
         level_mgr.current_level_idx = 0
         g_level_stars = {}
         current_state = STATE_INTRO_1
@@ -1767,11 +1952,17 @@ def main():
 
     def cb_continue_game():
         """继续游戏：读取本地存档并进入关卡目录"""
-        global current_state, g_level_stars
+        global current_state, g_level_stars, g_game_stats, g_achievement_manager
         loaded = load_progress()
         if loaded:
             level_mgr.current_level_idx = min(loaded[0], len(level_mgr.levels) - 1)
             g_level_stars = loaded[1] if isinstance(loaded[1], dict) else {}
+            if loaded[2] is not None and isinstance(loaded[2], dict):
+                def_stats = _default_game_stats()
+                def_stats.update(loaded[2])
+                g_game_stats.update(def_stats)
+            if loaded[3] is not None:
+                g_achievement_manager.load(loaded[3])
         else:
             level_mgr.current_level_idx = 0
             g_level_stars = {}
@@ -1800,8 +1991,9 @@ def main():
 
     def start_level_play():
         nonlocal has_satellite_array_tech, hidden_attempts, sim_result, is_animating, path_indices, has_laser_tech, current_mod, current_code
-        global current_state, g_letter_scroll_idx
+        global current_state, g_letter_scroll_idx, g_level_start_time
 
+        g_level_start_time = pygame.time.get_ticks()
         sim_result = None
         is_animating = False
         path_indices = []
@@ -2245,6 +2437,8 @@ def main():
                          hidden_attempts -= 1 
                      return
                 
+        global g_game_stats
+        g_game_stats["total_transmissions"] = g_game_stats.get("total_transmissions", 0) + 1
         is_animating = True
         anim_progress = 0.0
         sim_result = None 
@@ -2499,8 +2693,32 @@ def main():
             if isinstance(level_id, int):
                 thresholds = level.get('star_thresholds', {})
                 stars = calculate_stars(ber, thresholds)
-                global g_level_stars
+                global g_level_stars, g_game_stats, g_achievement_manager, g_achievement_popup_queue
                 g_level_stars[level_id] = max(g_level_stars.get(level_id, 0), stars)
+                # 阶段三 3.1/3.2：更新游戏统计、评分、成就
+                time_spent = (pygame.time.get_ticks() - g_level_start_time) / 1000.0
+                mod_key = (current_mod or "").replace("(", "").replace(")", "").strip()
+                if "BPSK" in (current_mod or ""): g_game_stats["bpsk_clears"] = g_game_stats.get("bpsk_clears", 0) + 1
+                if "QPSK" in (current_mod or ""): g_game_stats["qpsk_clears"] = g_game_stats.get("qpsk_clears", 0) + 1
+                if "8PSK" in (current_mod or ""): g_game_stats["psk8_clears"] = g_game_stats.get("psk8_clears", 0) + 1
+                code_key = (current_code or "None").lower()
+                if current_code is None or current_code == "None": g_game_stats["none_clears"] = g_game_stats.get("none_clears", 0) + 1
+                elif "Repetition" in (current_code or ""): g_game_stats["repetition_clears"] = g_game_stats.get("repetition_clears", 0) + 1
+                elif "Hamming" in (current_code or ""): g_game_stats["hamming_clears"] = g_game_stats.get("hamming_clears", 0) + 1
+                elif "Polar" in (current_code or ""): g_game_stats["polar_clears"] = g_game_stats.get("polar_clears", 0) + 1
+                elif "LDPC" in (current_code or ""): g_game_stats["ldpc_clears"] = g_game_stats.get("ldpc_clears", 0) + 1
+                g_game_stats["best_ber"] = min(g_game_stats.get("best_ber", 1.0), ber)
+                g_game_stats["fastest_time"] = min(g_game_stats.get("fastest_time", 999), time_spent)
+                if level_id == 5 and (not current_code or current_code == "None"):
+                    g_game_stats["level_5_no_coding"] = True
+                if level.get("snr_db", 10) < 0:
+                    g_game_stats["low_snr_clear"] = True
+                total_score, score_breakdown, grade = calculate_score(ber, level.get("target_ber", 0.01), time_spent, (current_mod, current_code), level_id)
+                g_game_stats["highest_score"] = max(g_game_stats.get("highest_score", 0), total_score)
+                levels_completed = level_mgr.current_level_idx + 1
+                full_stats = build_stats_for_achievements(level_mgr, g_level_stars, levels_completed, g_game_stats)
+                newly = g_achievement_manager.check_achievements(full_stats)
+                g_achievement_popup_queue.extend(newly)
             
             # Unlock Secret Reward
             if level.get('id') == "HIDDEN_SAT_ARRAY":
@@ -2536,9 +2754,14 @@ def main():
                 failure_reason = "同步失败：接收端无法在当前信噪比下恢复有效比特流。"
 
         stars_earned = 0
+        score_breakdown = []
+        total_score = 0
+        grade = "C"
         if passed and isinstance(level.get('id'), int):
             thresholds = level.get('star_thresholds', {})
             stars_earned = calculate_stars(ber, thresholds)
+            time_spent = (pygame.time.get_ticks() - g_level_start_time) / 1000.0
+            total_score, score_breakdown, grade = calculate_score(ber, level.get('target_ber', 0.01), time_spent, (current_mod, current_code), level.get('id'))
         sim_result = {
             "level_id": level.get('id'),
             "rx_syms": rx_syms,
@@ -2550,6 +2773,9 @@ def main():
             "final_snr": last_snr,
             "steps": steps,
             "failure_reason": failure_reason,
+            "score_breakdown": score_breakdown,
+            "total_score": total_score,
+            "grade": grade,
             # Data for detailed analysis report
             "analysis_data": {
                 "raw_bits": raw_bits[:64], # Sample first 64 bits
@@ -2588,6 +2814,8 @@ def main():
                 is_animating = False
                 path_indices = [] # Reset path
                 transmission_stats_until = 0
+                # 阶段三：过关并进入下一关后保存进度与成就
+                save_progress(level_mgr.current_level_idx, g_level_stars, g_game_stats, g_achievement_manager.save())
                 
                 # The NEW current level
                 new_lvl = level_mgr.get_current_level()
@@ -2611,6 +2839,7 @@ def main():
             else:
                 # 游戏通关：跳转到致谢屏幕 (方案 C)
                 global credits_scroll_y
+                save_progress(level_mgr.current_level_idx, g_level_stars, g_game_stats, g_achievement_manager.save())
                 credits_scroll_y = WINDOW_HEIGHT
                 current_state = STATE_CREDITS
                 level_mgr.current_level_idx = 0 # 重置，方便下次开始
@@ -2652,10 +2881,11 @@ def main():
         current_state = STATE_START_SCREEN
 
     def cb_restart_level():
-        global current_state
+        global current_state, g_game_stats
         nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts, transmission_stats_until
+        g_game_stats["total_retries"] = g_game_stats.get("total_retries", 0) + 1
         # 保存进度并返回关卡目录
-        save_progress(level_mgr.current_level_idx, g_level_stars)
+        save_progress(level_mgr.current_level_idx, g_level_stars, g_game_stats, g_achievement_manager.save())
         path_indices = []
         sim_result = None
         level_complete = False
@@ -2740,6 +2970,15 @@ def main():
     btn_level_catalog = Button(mx_btn - btn_w // 2, start_y + gap * 2, btn_w, btn_h, "关卡目录", cb_open_level_catalog, (80, 120, 150))
     btn_kv = Button(mx_btn - btn_w // 2, start_y + gap * 3, btn_w, btn_h, "失落数据", cb_open_knowledge_menu, (100, 100, 120))
     btn_settings = Button(mx_btn - btn_w // 2, start_y + gap * 4, btn_w, btn_h, "系统设置", cb_open_settings, (80, 80, 100))
+    
+    def cb_open_achievements():
+        global current_state
+        current_state = STATE_ACHIEVEMENTS
+    def cb_back_from_achievements():
+        global current_state
+        current_state = STATE_START_SCREEN
+    btn_achievements = Button(30, WINDOW_HEIGHT - 60, 120, 44, "成就", cb_open_achievements, (60, 80, 100))
+    btn_achievements_back = Button(WINDOW_WIDTH - 220, WINDOW_HEIGHT - 80, 200, 50, "返回", cb_back_from_achievements, (80, 80, 80))
     
     # Settings UI
     # Initialize slider with default volume 0.5 if not set, or get current
@@ -2867,6 +3106,10 @@ def main():
         events = pygame.event.get()
         for e in events:
             if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            # 成就弹窗：点击任意处关闭当前条并显示下一条
+            if g_achievement_popup_queue and e.type == pygame.MOUSEBUTTONDOWN:
+                g_achievement_popup_queue.pop(0)
+                continue
             
             # --- Intro States Logic ---
             if current_state in [STATE_INTRO_1, STATE_INTRO_2]:
@@ -2885,6 +3128,7 @@ def main():
                 btn_level_catalog.handle_event(e)
                 btn_kv.handle_event(e)
                 btn_settings.handle_event(e)
+                btn_achievements.handle_event(e)
             elif current_state == STATE_LEVEL_CATALOG:
                 btn_catalog_back.handle_event(e)
                 if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
@@ -2900,17 +3144,19 @@ def main():
                     # Volume changed
                     pygame.mixer.music.set_volume(slider_vol.val)
                 btn_settings_back.handle_event(e)
+            elif current_state == STATE_ACHIEVEMENTS:
+                btn_achievements_back.handle_event(e)
             
             elif current_state == STATE_KNOWLEDGE_MENU:
                 btn_kv_back.handle_event(e)
                 if e.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = e.pos
-                    # Check cards
-                    for rect, item in g_knowledge_ui_rects:
-                        if rect.collidepoint((mx, my)):
+                    for rect, node_data in g_tech_tree_rects:
+                        if rect.collidepoint((mx, my)) and node_data.get("unlocked") and node_data.get("detail_item"):
                             global g_current_knowledge_item
-                            g_current_knowledge_item = item
+                            g_current_knowledge_item = node_data["detail_item"]
                             current_state = STATE_KNOWLEDGE_DETAIL
+                            break
             
             elif current_state == STATE_KNOWLEDGE_DETAIL:
                 btn_detail_back.handle_event(e)
@@ -3034,7 +3280,7 @@ def main():
 
         # Draw
         if current_state == STATE_START_SCREEN:
-            draw_start_screen(screen, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings)
+            draw_start_screen(screen, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings, btn_achievements)
         elif current_state == STATE_LEVEL_CATALOG:
             draw_level_catalog(screen, level_mgr, g_level_stars, btn_catalog_back)
         elif current_state in [STATE_INTRO_1, STATE_INTRO_2]:
@@ -3063,11 +3309,12 @@ def main():
             draw_settings_screen(screen, btn_settings_back, slider_vol)
         
         elif current_state == STATE_KNOWLEDGE_MENU:
-            draw_knowledge_menu(screen, btn_kv_back)
+            draw_knowledge_menu(screen, btn_kv_back, level_mgr, level_mgr.current_level_idx)
         
         elif current_state == STATE_KNOWLEDGE_DETAIL:
             draw_knowledge_detail(screen, btn_detail_back)
-
+        elif current_state == STATE_ACHIEVEMENTS:
+            draw_achievements_screen(screen, btn_achievements_back)
         elif current_state == STATE_EDU_SHOWCASE:
             draw_edu_showcase_screen(screen, btn_next_edu)
 
@@ -3507,11 +3754,24 @@ def main():
                         screen.blit(label_font.render("★", True, GOLD), (sx, y_gauge+105))
                     else:
                         screen.blit(label_font.render("☆", True, GRAY), (sx, y_gauge+105))
+                # 阶段三 3.2 关卡评分详情
+                brk = sim_result.get("score_breakdown", [])
+                total_score = sim_result.get("total_score", 0)
+                grade = sim_result.get("grade", "C")
+                y_sc = y_gauge + 132
+                screen.blit(label_font.render("关卡评分", True, (200, 220, 255)), (bx+20, y_sc))
+                y_sc += 22
+                for name, pts in brk:
+                    screen.blit(label_font.render(f"  {name} +{pts}", True, SUCCESS_COLOR), (bx+20, y_sc))
+                    y_sc += 18
+                screen.blit(label_font.render(f"总分: {total_score} / 200  评级: {grade}", True, GOLD), (bx+20, y_sc))
+                y_sc += 24
+                y_diag = y_sc + 10
+            else:
+                y_diag = y_gauge + 120
 
             # --- 4. Diagnostic Log / Signal History ---
-            # Dynamic resizing based on available vertical space
-            # Start below Link Quality
-            y_diag = y_gauge + 120
+            # Start below Link Quality or below score detail when level complete
             
             # Initialize log_lines
             log_lines = []
@@ -3527,7 +3787,7 @@ def main():
             
             # Calculate max available height (leave space for buttons)
             # Buttons start at y = WINDOW_HEIGHT - 200 (Topmost Analysis button)
-            # Let's give it a 20px padding
+            # Let's give it a 20px padding; if score detail was drawn, y_diag was advanced
             y_buttons_top = WINDOW_HEIGHT - 200
             max_log_h = y_buttons_top - y_diag - 20
             
@@ -3695,7 +3955,13 @@ def main():
                 screen.blit(font.render(f"✗ 错误: {error} 个", True, ERROR_COLOR), (box_rect.x + 25, box_rect.y + 82))
                 screen.blit(font.render(f"最终误码率: {ber:.4f}", True, (220, 220, 220)), (box_rect.x + 25, box_rect.y + 106))
 
+        # 阶段三 3.1：成就解锁弹窗（置顶）
+        if g_achievement_popup_queue:
+            draw_achievement_popup(screen, g_achievement_popup_queue[0], font, header_font)
+
         pygame.display.flip()
+        # 累计游戏时长（成就统计）
+        g_game_stats["total_playtime"] = g_game_stats.get("total_playtime", 0) + clock.get_time() / 1000.0
         clock.tick(60)
 
 if __name__ == "__main__":
