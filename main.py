@@ -146,8 +146,14 @@ def _default_game_stats():
 # 全局成就与统计（在 main() 中加载后使用）
 g_game_stats = _default_game_stats()
 g_achievement_manager = AchievementManager()
-g_achievement_popup_queue = []  # 待显示的成就 id 列表
+g_achievement_popup_queue = []  # 待显示的成就 id 列表（成就.md 4.3 小型通知依次显示）
+g_achievement_notif_state = None  # 当前通知动画状态: {"ach_id", "phase", "start_ticks", "x_offset"}
+g_achievement_scroll_y = 0  # 成就列表界面垂直滚动偏移（像素）
 g_level_start_time = 0  # 进入关卡时的 ticks，用于计算用时
+
+# 成就小型通知参数（成就.md 4.3：右上角、滑入 2s 停留 滑出、不阻塞）
+NOTIF_W, NOTIF_H = 280, 80
+NOTIF_SLIDE_MS, NOTIF_HOLD_MS = 220, 2000
 
 def save_progress(level_idx, stars_dict, game_stats=None, achievements_list=None):
     """将关卡进度、星级、游戏统计与成就写入存档（阶段三 3.1）"""
@@ -1664,42 +1670,77 @@ def draw_knowledge_detail(surface, btn_back):
     btn_back.draw(surface)
 
 
-# --- 阶段三 3.1 成就弹窗与成就列表界面 ---
-def draw_achievement_popup(surface, ach_id, font_obj, header_font_obj):
-    """绘制单条成就解锁弹窗（居中，半透明遮罩）。"""
-    ach = g_achievement_manager.get_achievement(ach_id)
-    if not ach:
+# --- 阶段三 3.1 成就通知与成就列表界面（成就.md 4.3 + 上下滑动）---
+def update_achievement_notification(ticks_ms):
+    """更新成就小型通知状态：滑入→停留 2s→滑出，不阻塞；多个成就依次显示。"""
+    global g_achievement_notif_state, g_achievement_popup_queue
+    target_x = WINDOW_WIDTH - NOTIF_W - 24
+    if g_achievement_notif_state is None:
+        if not g_achievement_popup_queue:
+            return
+        ach_id = g_achievement_popup_queue.pop(0)
+        g_achievement_notif_state = {
+            "ach_id": ach_id,
+            "phase": "slide_in",
+            "start_ticks": ticks_ms,
+            "x_offset": WINDOW_WIDTH,
+        }
         return
-    # 遮罩
-    overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 160))
-    surface.blit(overlay, (0, 0))
-    # 卡片
-    card_w, card_h = 400, 220
-    cx, cy = WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2
-    card = pygame.Rect(cx - card_w // 2, cy - card_h // 2, card_w, card_h)
-    s = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
-    s.fill((25, 30, 40, 250))
-    pygame.draw.rect(s, ACCENT_COLOR, s.get_rect(), 2, border_radius=12)
-    surface.blit(s, card)
-    # 标题
-    title_surf = header_font_obj.render("成就解锁！", True, (255, 200, 50))
-    surface.blit(title_surf, (cx - title_surf.get_width() // 2, card.y + 20))
+    st = g_achievement_notif_state
+    elapsed = ticks_ms - st["start_ticks"]
+    if st["phase"] == "slide_in":
+        t = min(1.0, elapsed / NOTIF_SLIDE_MS)
+        # 缓动：ease-out
+        t = 1.0 - (1.0 - t) ** 2
+        st["x_offset"] = int(WINDOW_WIDTH + (target_x - WINDOW_WIDTH) * t)
+        if elapsed >= NOTIF_SLIDE_MS:
+            st["phase"] = "hold"
+            st["start_ticks"] = ticks_ms
+    elif st["phase"] == "hold":
+        if elapsed >= NOTIF_HOLD_MS:
+            st["phase"] = "slide_out"
+            st["start_ticks"] = ticks_ms
+    elif st["phase"] == "slide_out":
+        t = min(1.0, elapsed / NOTIF_SLIDE_MS)
+        t = t * t  # ease-in
+        st["x_offset"] = int(target_x + (WINDOW_WIDTH - target_x) * t)
+        if elapsed >= NOTIF_SLIDE_MS:
+            g_achievement_notif_state = None
+            # 立即检查队列，下一帧会显示下一个
+            return update_achievement_notification(ticks_ms)
+
+
+def draw_achievement_notification(surface, font_obj, label_font_obj):
+    """绘制右上角小型成就通知（成就.md 4.3）：从右侧滑入，停留 2 秒后滑出。"""
+    global g_achievement_notif_state
+    if g_achievement_notif_state is None:
+        return
+    st = g_achievement_notif_state
+    ach = g_achievement_manager.get_achievement(st["ach_id"])
+    if not ach:
+        g_achievement_notif_state = None
+        return
+    x = st["x_offset"]
+    y = 24
+    # 小型通知框
+    s = pygame.Surface((NOTIF_W, NOTIF_H), pygame.SRCALPHA)
+    s.fill((22, 28, 36, 248))
+    pygame.draw.rect(s, ACCENT_COLOR, s.get_rect(), 2, border_radius=10)
+    surface.blit(s, (x, y))
+    # 🎉 成就解锁！
+    title_surf = label_font_obj.render("成就解锁！", True, (255, 200, 50))
+    surface.blit(title_surf, (x + 16, y + 12))
     # 图标 + 名称
-    icon_surf = font_obj.render(ach["icon"] + " " + ach["name"], True, (255, 255, 255))
-    surface.blit(icon_surf, (cx - icon_surf.get_width() // 2, card.y + 70))
-    # 描述
-    desc_surf = font_obj.render(ach["desc"], True, (180, 200, 220))
-    surface.blit(desc_surf, (cx - desc_surf.get_width() // 2, card.y + 110))
-    hint = font_obj.render("点击任意处继续", True, (120, 140, 160))
-    surface.blit(hint, (cx - hint.get_width() // 2, card.bottom - 40))
+    name_surf = font_obj.render(ach["icon"] + " " + ach["name"], True, (255, 255, 255))
+    surface.blit(name_surf, (x + 16, y + 38))
 
 
 def draw_achievements_screen(surface, btn_back):
-    """成就列表界面：分类、进度条、已解锁/未解锁列表。"""
+    """成就列表界面：分类、进度条、已解锁/未解锁列表；支持上下滑动（成就.md 4.2 + 滑动）。"""
+    global g_achievement_scroll_y
     surface.fill(BG_COLOR)
     unlocked_count, total_count = g_achievement_manager.get_progress()
-    # 标题与进度
+    # 标题与进度（固定）
     t_surf = header_font.render("成就系统", True, ACCENT_COLOR)
     surface.blit(t_surf, (WINDOW_WIDTH // 2 - t_surf.get_width() // 2, 30))
     prog_str = f"进度: {unlocked_count} / {total_count}"
@@ -1711,8 +1752,25 @@ def draw_achievements_screen(surface, btn_back):
     pct = unlocked_count / total_count if total_count else 0
     pygame.draw.rect(surface, ACCENT_COLOR, (bar_x, 105, int(bar_w * pct), 18), border_radius=4)
     pygame.draw.rect(surface, (60, 70, 85), (bar_x, 105, bar_w, 18), 1, border_radius=4)
-    # 分类列表
-    y = 140
+    # 列表区域：可滚动，可见高度从 130 到 返回按钮上方
+    list_top = 130
+    list_bottom = WINDOW_HEIGHT - 90
+    visible_h = list_bottom - list_top
+    # 先计算总内容高度
+    content_y = 0
+    for category, cat_name in CATEGORY_NAMES.items():
+        items = g_achievement_manager.get_by_category(category)
+        if not items:
+            continue
+        content_y += 28
+        content_y += len(items) * 62
+        content_y += 12
+    max_scroll = max(0, content_y - visible_h)
+    g_achievement_scroll_y = max(0, min(g_achievement_scroll_y, max_scroll))
+    # 裁剪并绘制列表
+    clip_rect = pygame.Rect(0, list_top, WINDOW_WIDTH, visible_h)
+    surface.set_clip(clip_rect)
+    y = list_top - g_achievement_scroll_y
     for category, cat_name in CATEGORY_NAMES.items():
         items = g_achievement_manager.get_by_category(category)
         if not items:
@@ -1734,6 +1792,11 @@ def draw_achievements_screen(surface, btn_back):
             surface.blit(label_font.render(status, True, (100, 200, 120) if unlocked else (100, 100, 110)), (r.right - 90, y + 18))
             y += 62
         y += 12
+    surface.set_clip(None)
+    # 滚动提示（当可滚动时）
+    if max_scroll > 0:
+        hint = label_font.render("滚轮上下滑动", True, (100, 120, 140))
+        surface.blit(hint, (WINDOW_WIDTH - hint.get_width() - 24, list_bottom - 22))
     btn_back.draw(surface)
 
 
@@ -3106,10 +3169,10 @@ def main():
         events = pygame.event.get()
         for e in events:
             if e.type == pygame.QUIT: pygame.quit(); sys.exit()
-            # 成就弹窗：点击任意处关闭当前条并显示下一条
-            if g_achievement_popup_queue and e.type == pygame.MOUSEBUTTONDOWN:
-                g_achievement_popup_queue.pop(0)
-                continue
+            # 成就小型通知：点击可提前关闭当前条（可选，不阻塞故一般不处理）
+            if e.type == pygame.MOUSEWHEEL and current_state == STATE_ACHIEVEMENTS:
+                global g_achievement_scroll_y
+                g_achievement_scroll_y = max(0, g_achievement_scroll_y - e.y * 48)
             
             # --- Intro States Logic ---
             if current_state in [STATE_INTRO_1, STATE_INTRO_2]:
@@ -3955,9 +4018,10 @@ def main():
                 screen.blit(font.render(f"✗ 错误: {error} 个", True, ERROR_COLOR), (box_rect.x + 25, box_rect.y + 82))
                 screen.blit(font.render(f"最终误码率: {ber:.4f}", True, (220, 220, 220)), (box_rect.x + 25, box_rect.y + 106))
 
-        # 阶段三 3.1：成就解锁弹窗（置顶）
-        if g_achievement_popup_queue:
-            draw_achievement_popup(screen, g_achievement_popup_queue[0], font, header_font)
+        # 阶段三 3.1：成就小型通知（成就.md 4.3，右上角滑入/2s 停留/滑出，不阻塞）
+        update_achievement_notification(pygame.time.get_ticks())
+        if g_achievement_notif_state:
+            draw_achievement_notification(screen, font, label_font)
 
         pygame.display.flip()
         # 累计游戏时长（成就统计）
