@@ -3510,9 +3510,11 @@ def main():
                                 map_click_consumed = True
                             else:
                                 NODE_HIT_RADIUS = 28  # 节点可点击半径，略大于绘制半径便于操作
+                                hit_radius_sq = NODE_HIT_RADIUS * NODE_HIT_RADIUS
                                 for idx, node in enumerate(level['nodes']):
-                                    dist = np.hypot(mx - node['pos'][0], my - node['pos'][1])
-                                    if dist < NODE_HIT_RADIUS:
+                                    dx = mx - node['pos'][0]
+                                    dy = my - node['pos'][1]
+                                    if dx * dx + dy * dy < hit_radius_sq:
                                         if not path_indices:
                                             if node['type'] == 'src':
                                                 path_indices.append(idx)
@@ -4257,21 +4259,6 @@ def main():
                     g_tutorial.completed = True
             # -------------------------------------------------------------
             
-            if level_complete and level.get('id') != 'HIDDEN_SAT_ARRAY':
-                btn_next.draw(screen)
-            if sim_result and not is_animating: btn_analysis.draw(screen)
-            
-            # Restart Button (Always visible in Playing unless restricted)
-            if level.get('id') != 'HIDDEN_SAT_ARRAY':
-                btn_restart_level.draw(screen)
-            
-            if level.get('id') == 'HIDDEN_SAT_ARRAY':
-                btn_exit_hidden.draw(screen)
-
-            # Analysis Overlay
-            if show_analysis:
-                draw_analysis_report(screen, sim_result, btn_close_report)
-
             # 传输过程可视化 (2.3)：传输完成后显示统计覆盖层
             if sim_result and not is_animating and transmission_stats_until > 0 and pygame.time.get_ticks() < transmission_stats_until:
                 ber = sim_result.get('ber', 0)
