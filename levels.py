@@ -144,6 +144,14 @@ class LevelManager:
                 "target_ber": 0.05,
                 "star_thresholds": {"one_star": 0.05, "two_star": 0.02, "three_star": 0.01},
                 "reward": "极化码原型机：获得 Polar Code (SC Decoder)",
+                "satellite_deployment": {
+                    "enabled": True,
+                    "budget": 1000,
+                    "position_range": {"x": (220, 760), "y": (120, 700)},
+                    "reference_pos": (100, 400),
+                    "cost_per_distance": 1.8,
+                    "max_satellites": 2,
+                },
                 # 节点索引: 0:HQ, 1:Relay Alpha, 2:Relay Beta, 3:Ruins
                 "snr_matrix": [
                     # To:  HQ    Alpha  Beta   Ruins
@@ -245,7 +253,7 @@ class LevelManager:
                 "mission_text": "任务：点亮木星中继站。\n操作：必须启用 LASER MODULE 才能穿透磁暴。\n提示：激光能提供巨大的 SNR 增益，它是深空通信的唯一解。",
                 "message": "木星的大红斑如同一只古老的邪眼，冷冷地审视着我们这些渺小的闯入者。这里的磁场如同狂暴的野兽，不断撕扯着微弱的电波信号。但正是这股毁灭性的力量，将成为我们跳向深空的最好踏板。我们必须在混沌的风暴中心搭建起稳定的激光链路，将方舟号的轨道参数精准注入。这是最后的引力变轨机会，成败在此一举，我们将借巨人之力，飞越太阳系的边界。",
                 "message_desc": "[引力弹弓]",
-                "tx_power": 60, # 调整：提高发射功率
+                "tx_power": 70, # 调整：提高发射功率
                 "available_mods": ["BPSK", "QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)", "Polar(1024,512)"],
                 "target_ber": 0.002,
@@ -273,9 +281,9 @@ class LevelManager:
                 "message": "战争的阴云早已散去，但它涂抹在文明脸庞上的灰烬从未被雨水洗净。怨恨、遗憾、悲伤......这些沉重的包袱，终将被辐射尘深深地埋葬在曾经丰饶的沃土之下。现在，我们唯有前进这一条路可走。宇宙虽寂暗无声，却处处潜藏着新生的脉搏。这些信号会携带着我们的心愿飞向更遥远的地平线，如同当年先辈们驶出摇篮那样，即使是微弱的火种，也要在那无尽的黑暗中开拓出新的家园。",
                 "message_desc": "[穿越碎石]",
                 "tx_power": 70, # 调整：提高发射功率
-                "available_mods": ["QPSK"],
+                "available_mods": ["BPSK","QPSK"],
                 "available_codes": ["Repetition(3,1)", "Hamming(7,4)", "Polar(512,256)"],
-                "target_ber": 0.0002,
+                "target_ber": 0.002,
                 "star_thresholds": {"one_star": 0.0002, "two_star": 0.0001, "three_star": 0.00005},
                 "reward": "获得深空探测器控制权",
                 "nodes": [

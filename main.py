@@ -1,6 +1,7 @@
 import pygame
 import sys
 import math
+import random
 import numpy as np
 import os # 新增
 from dsp_engine import DSPEngine as dsp
@@ -12,6 +13,7 @@ from weather_system import WeatherSystem
 from protocol_system import ProtocolSystem
 from tech_balance import recommend_tech_combo
 from transmission_control import PowerSlider, SegmentedTransmission
+from satellite_system import SatelliteDeployment, DynamicNetwork, SATELLITE_TYPES
 
 # --- 初始化 ---
 pygame.init()
@@ -106,6 +108,7 @@ STATE_INTRO_1 = 11 # 新增开场 1: HOPE IS A WAVEFORM
 STATE_INTRO_2 = 12 # 新增开场 2: IS ANYONE OUT THERE?
 STATE_LEVEL_CATALOG = 13 # 关卡目录（选择关卡）
 STATE_ACHIEVEMENTS = 14 # 成就界面（阶段三 3.1）
+STATE_SATELLITE_DEPLOYMENT = 15 # 阶段三：卫星部署界面
 
 # --- 存档路径 ---
 SAVE_FILE = "save.json"
@@ -536,6 +539,10 @@ TOOLTIPS = {
     "Repetition(3,1)": "重复码\n每个比特重复3次",
     "Hamming(7,4)": "汉明码\n可自动纠正1位错误",
     "None": "无编码\n直接传输，无冗余",
+    "udp": "UDP：低延迟，可靠性较弱\n适合快速试探链路",
+    "tcp": "TCP：可靠性更高但开销大\n适合稳态传输",
+    "sctp": "SCTP：多流平衡策略\n速度与可靠性折中",
+    "quic": "QUIC：现代高速协议\n高预算下可提升吞吐",
 }
 def estimate_ber(snr_db, modulation, coding):
     """预估当前配置下的理论误码率（用于参数预览）"""
@@ -1175,6 +1182,8 @@ def draw_level_catalog(surface, level_mgr, stars_dict, btn_back):
 
 def draw_briefing_screen(surface, level, btn):
     surface.fill(BG_COLOR)
+    if "pending_weather" not in level:
+        level["pending_weather"] = random.choice(["clear", "cloudy", "rain", "storm", "solar_flare"])
     
     # Title
     phase = font.render(level['phase'], True, ACCENT_COLOR)
@@ -1201,8 +1210,34 @@ def draw_briefing_screen(surface, level, btn):
             y_inner = render_text_wrapped(surface, line, (130, y_inner), 940, font, col)
             y_inner += 5 # padding
             
+    # Weather & tech impact preview before mission start
+    y_weather = y + 220
+    weather_key = level.get("pending_weather", "clear")
+    weather_probe = WeatherSystem()
+    weather_probe.set_weather(weather_key)
+    w_info = weather_probe.get_weather_info()
+    pygame.draw.rect(surface, (18, 26, 36), (100, y_weather, 1000, 120), border_radius=10)
+    pygame.draw.rect(surface, (70, 90, 120), (100, y_weather, 1000, 120), 1, border_radius=10)
+    surface.blit(font.render(f"天气预报: {w_info.name} ({weather_key})", True, (180, 220, 255)), (120, y_weather + 14))
+    effect_lines = [
+        f"总体影响: {w_info.description}",
+        f"SNR修正: {w_info.snr_penalty:+.1f} dB   激光附加: {w_info.laser_penalty:+.1f} dB   BER倍率: x{w_info.ber_multiplier:.2f}",
+    ]
+    available_mods = level.get("available_mods", [])
+    available_codes = level.get("available_codes", [])
+    if "BPSK" in available_mods and weather_key in ("storm", "solar_flare"):
+        effect_lines.append("技术建议: BPSK 在当前天气更稳健。")
+    if "QPSK" in available_mods and weather_key == "clear":
+        effect_lines.append("技术建议: 晴朗环境可优先尝试 QPSK 提升吞吐。")
+    if any((c or "").startswith("Polar") for c in available_codes):
+        effect_lines.append("技术建议: Polar 码在干扰天气有额外抗扰收益。")
+    y_w = y_weather + 44
+    for line in effect_lines[:4]:
+        y_w = render_text_wrapped(surface, line, (120, y_w), 960, label_font, TEXT_COLOR)
+        y_w += 4
+
     # Reward
-    y_reward = y + 220
+    y_reward = y_weather + 140
     if 'reward' in level:
         lbl = label_font.render("任务奖励:", True, SUCCESS_COLOR)
         val = font.render(level['reward'], True, (255, 255, 255))
@@ -1224,6 +1259,83 @@ def draw_briefing_screen(surface, level, btn):
         surface.blit(star_surf, (x, star_y))
 
     btn.draw(surface)
+
+
+def draw_satellite_deployment_screen(
+    surface,
+    level,
+    deployment,
+    selected_sat_type,
+    selected_pos,
+    deploy_message,
+    btn_confirm,
+    btn_skip,
+    btn_done,
+):
+    surface.fill(BG_COLOR)
+    pygame.draw.rect(surface, (16, 22, 32), (0, 0, WINDOW_WIDTH, 100))
+    surface.blit(header_font.render("卫星部署阶段", True, ACCENT_COLOR), (40, 24))
+    surface.blit(font.render(f"关卡: {level.get('title', '')}", True, TEXT_COLOR), (40, 60))
+
+    # Deploy area
+    px1, px2 = deployment.position_range["x"]
+    py1, py2 = deployment.position_range["y"]
+    area_rect = pygame.Rect(px1, py1, px2 - px1, py2 - py1)
+    pygame.draw.rect(surface, (20, 36, 52), area_rect)
+    pygame.draw.rect(surface, (70, 120, 170), area_rect, 2)
+    surface.blit(label_font.render("可部署区域（点击选点）", True, (180, 220, 255)), (area_rect.x + 10, area_rect.y + 10))
+
+    # Existing nodes
+    for node in level.get("nodes", []):
+        color = (100, 255, 255) if node.get("type") == "src" else (255, 120, 120) if node.get("type") == "dest" else (220, 220, 120)
+        pygame.draw.circle(surface, color, (int(node["pos"][0]), int(node["pos"][1])), 7)
+        txt = label_font.render(node.get("name", ""), True, (210, 210, 210))
+        surface.blit(txt, (int(node["pos"][0]) + 10, int(node["pos"][1]) - 10))
+
+    # Reference point
+    ref = deployment.reference_pos
+    pygame.draw.circle(surface, (255, 210, 90), (int(ref[0]), int(ref[1])), 8)
+    surface.blit(label_font.render("参考点", True, (255, 210, 90)), (int(ref[0]) + 10, int(ref[1]) - 18))
+
+    # Deployed satellites
+    for sat in deployment.deployed_satellites:
+        pygame.draw.circle(surface, (120, 255, 140), (int(sat["pos"][0]), int(sat["pos"][1])), 9)
+        surface.blit(label_font.render(sat["name"], True, (190, 255, 200)), (int(sat["pos"][0]) + 10, int(sat["pos"][1]) - 10))
+
+    # Selected point preview
+    preview_cost = 0
+    if selected_pos is not None:
+        pygame.draw.circle(surface, (0, 200, 255), (int(selected_pos[0]), int(selected_pos[1])), 9, 2)
+        preview_cost = deployment.get_deploy_cost(selected_pos, selected_sat_type)
+        pygame.draw.line(surface, (90, 120, 160), ref, selected_pos, 1)
+
+    # Right panel
+    panel_x = MAP_WIDTH + 10
+    pygame.draw.rect(surface, (20, 24, 30), (MAP_WIDTH, 0, HUD_WIDTH, WINDOW_HEIGHT))
+    pygame.draw.rect(surface, ACCENT_COLOR, (MAP_WIDTH, 0, HUD_WIDTH, WINDOW_HEIGHT), 2)
+    surface.blit(font.render(f"预算: {deployment.budget}/{deployment.initial_budget}", True, (255, 215, 120)), (panel_x, 30))
+    surface.blit(label_font.render(f"已部署: {len(deployment.deployed_satellites)} / {deployment.max_satellites}", True, (180, 210, 240)), (panel_x, 60))
+
+    y = 110
+    for sat_key, sat in SATELLITE_TYPES.items():
+        r = pygame.Rect(panel_x, y, HUD_WIDTH - 24, 64)
+        col = (36, 70, 90) if sat_key == selected_sat_type else (44, 48, 56)
+        pygame.draw.rect(surface, col, r, border_radius=6)
+        pygame.draw.rect(surface, (120, 140, 170), r, 1, border_radius=6)
+        surface.blit(label_font.render(f"{sat['name']} ({sat_key})", True, TEXT_COLOR), (r.x + 10, r.y + 8))
+        surface.blit(label_font.render(f"基础成本 {sat['base_cost']} | 增益 {sat['antenna_gain']}dBi", True, (170, 190, 210)), (r.x + 10, r.y + 32))
+        y += 74
+
+    if selected_pos is not None:
+        surface.blit(label_font.render(f"选中坐标: ({int(selected_pos[0])}, {int(selected_pos[1])})", True, (220, 220, 220)), (panel_x, y + 10))
+        surface.blit(label_font.render(f"预估成本: {preview_cost}", True, (255, 215, 120)), (panel_x, y + 34))
+
+    if deploy_message:
+        surface.blit(label_font.render(deploy_message, True, (255, 170, 170)), (40, WINDOW_HEIGHT - 40))
+
+    btn_confirm.draw(surface)
+    btn_skip.draw(surface)
+    btn_done.draw(surface)
 
 def draw_letter_view(surface, level, btn):
     surface.fill((10, 10, 12)) 
@@ -2042,8 +2154,7 @@ def main():
     # New: Polar Decoding Method Selection
     current_polar_method = "SC" # Default
     
-    # New: Energy & Tech System
-    energy = 3 # 能量有限
+    # Budget-driven tech system (remove reactor energy)
     has_laser_tech = False # 初始不可用，需解锁
     has_satellite_array_tech = False # 保持 False，等待玩家触发隐藏关
     laser_module_active = False # Toggle state
@@ -2060,6 +2171,13 @@ def main():
     ui_code_rects = []
     ui_protocol_rects = []
     weather_cycle_rect = pygame.Rect(0, 0, 0, 0)
+    hud_scroll_y = 0
+    hud_scroll_max = 0
+    sat_deployment = None
+    sat_network = None
+    sat_selected_type = "basic"
+    sat_selected_pos = None
+    sat_message = ""
     
     # UI Rects for decoding methods
     ui_decoder_rects = []
@@ -2077,6 +2195,16 @@ def main():
     protocol_system = ProtocolSystem()
     power_slider = PowerSlider(MAP_WIDTH + 40, 0, HUD_WIDTH - 80, min_power=10.0, max_power=70.0, current_power=30.0)
     segmented_transmission = None
+
+    def assign_pending_weather(level_obj):
+        if isinstance(level_obj, dict):
+            level_obj["pending_weather"] = random.choice(["clear", "cloudy", "rain", "storm", "solar_flare"])
+
+    def should_open_satellite_deployment(level_obj):
+        if not isinstance(level_obj, dict):
+            return False
+        dep = level_obj.get("satellite_deployment", {}) or {}
+        return bool(dep.get("enabled", False))
 
     def cb_new_game():
         """新游戏：覆盖存档并从第一关开场开始"""
@@ -2128,10 +2256,11 @@ def main():
         # Init first level logic
         level = level_mgr.get_current_level()
         if level:
+            assign_pending_weather(level)
             play_bgm(get_level_music(level.get('id', 0)))
 
     def start_level_play():
-        nonlocal has_satellite_array_tech, hidden_attempts, sim_result, is_animating, path_indices, has_laser_tech, current_mod, current_code, selected_protocol, segmented_transmission
+        nonlocal has_satellite_array_tech, hidden_attempts, sim_result, is_animating, path_indices, has_laser_tech, current_mod, current_code, selected_protocol, segmented_transmission, hud_scroll_y, sat_deployment, sat_network, sat_selected_pos, sat_message
         global current_state, g_letter_scroll_idx, g_level_start_time
 
         g_level_start_time = pygame.time.get_ticks()
@@ -2163,11 +2292,14 @@ def main():
 
         selected_protocol = "udp"
         segmented_transmission = None
+        hud_scroll_y = 0
+        sat_deployment = None
+        sat_network = None
+        sat_selected_pos = None
+        sat_message = ""
         if isinstance(lvl.get("id"), int):
             budget_manager.reset_level()
-            # A deterministic weather per level keeps gameplay fair and testable.
-            weather_candidates = ["clear", "cloudy", "rain", "storm", "solar_flare"]
-            weather_system.set_weather(weather_candidates[(lvl["id"] - 1) % len(weather_candidates)])
+            weather_system.set_weather(lvl.get("pending_weather", "clear"))
             recommendations = recommend_tech_combo(lvl, weather_system.current_weather)
             if recommendations and current_mod in ("BPSK", "QPSK"):
                 rec_mod = recommendations[0].get("modulation")
@@ -2242,10 +2374,31 @@ def main():
             return True
         return False
 
-    def cb_start_mission():
+    def proceed_to_mission_start():
         if start_edu_showcase():
             return
         start_level_play()
+
+    def start_satellite_deployment():
+        nonlocal sat_deployment, sat_network, sat_selected_type, sat_selected_pos, sat_message
+        global current_state
+        lvl = level_mgr.get_current_level()
+        if not lvl:
+            return False
+        sat_deployment = SatelliteDeployment(lvl, budget_manager.current_budget)
+        sat_network = DynamicNetwork(lvl)
+        sat_selected_type = "basic"
+        sat_selected_pos = None
+        sat_message = "提示：先在可部署区域点击位置，再点“确认发射”。"
+        current_state = STATE_SATELLITE_DEPLOYMENT
+        return True
+
+    def cb_start_mission():
+        lvl = level_mgr.get_current_level()
+        if should_open_satellite_deployment(lvl):
+            start_satellite_deployment()
+            return
+        proceed_to_mission_start()
 
     def cb_next_edu_slide():
         global g_edu_slide_idx
@@ -2508,6 +2661,7 @@ def main():
             g_level_start_time = pygame.time.get_ticks()
         else:
             current_state = STATE_BRIEFING
+            assign_pending_weather(level_mgr.get_current_level())
     
     def toggle_laser():
         nonlocal laser_module_active, sim_result
@@ -2536,11 +2690,6 @@ def main():
             sim_result = None
             is_animating = False
 
-    def cycle_weather():
-        nonlocal sim_result
-        weather_system.cycle_weather()
-        sim_result = None
-            
     def set_polar_method(method):
         nonlocal current_polar_method, sim_result
         if current_polar_method != method:
@@ -2548,7 +2697,7 @@ def main():
             sim_result = None
 
     def cb_run_sim():
-        nonlocal is_animating, anim_progress, sim_result, energy, show_analysis, hidden_attempts, segmented_transmission
+        nonlocal is_animating, anim_progress, sim_result, show_analysis, hidden_attempts, segmented_transmission
         
         # Validation for Tutorial / General safety
         if current_mod is None or current_code is None:
@@ -2574,24 +2723,9 @@ def main():
                 return
             hidden_attempts += 1 # 仅在发射时增加次数
         
-        # Energy + budget checks
-        energy_cost = 1.0 if laser_module_active else 0.1
-        energy_cost = protocol_system.apply_energy_effect(selected_protocol, energy_cost)
-        
-        if energy >= energy_cost:
-            energy -= energy_cost
-        else:
-            sim_result = {
-                "success": False,
-                "ber": 1.0,
-                "rx_msg": "ENERGY DEPLETED",
-                "tx_txt": "ERROR",
-                "rx_syms": [], # Fixed crash 'rx_syms'
-                "failure_reason": f"能量不足 (需 {energy_cost} 能量)"
-            }
-            return
-
         tx_cost = calculate_transmission_cost(power_slider.current_power, selected_protocol)
+        if laser_module_active:
+            tx_cost += 120
         paid, _ = budget_manager.spend(
             tx_cost,
             f"L{level.get('id')} {selected_protocol.upper()} {power_slider.current_power:.1f}dBm",
@@ -2660,7 +2794,9 @@ def main():
         if use_matrix and idx1 is not None and idx2 is not None:
             try:
                 val = level['snr_matrix'][idx1][idx2]
-                if val is not None: return val
+                if val is not None:
+                    # Power boost also affects matrix-based levels.
+                    return float(val) + (float(tx_power) - 30.0) * 1.2
             except IndexError:
                 pass
         
@@ -2846,7 +2982,7 @@ def main():
             # Legacy Single Hop (Level 1 etc)
             enc_bits = dsp.encode_data(raw_bits, current_code)
             tx_syms = dsp.modulate(enc_bits, current_mod)
-            snr = level.get('snr_db', 10) + (power_slider.current_power - 30.0)
+            snr = level.get('snr_db', 10) + (power_slider.current_power - 30.0) * 2.0
             use_noise = True  # 所有关卡均使用噪声，由 snr_db 控制
             
             if laser_module_active:
@@ -2995,9 +3131,7 @@ def main():
         # Determine failure reason
         failure_reason = ""
         if not passed:
-            if laser_module_active and energy <= 0:
-                failure_reason = "能源耗尽：激光模组因能源不足无法维持高增益链路。"
-            elif any(s['snr'] <= -900 for s in steps):
+            if any(s['snr'] <= -900 for s in steps):
                 failure_reason = "视线阻断：信号路径被小行星或障碍物完全遮挡，请重新规划路径。"
             elif ber > level['target_ber']:
                 failure_reason = "噪声过载：信道干扰过大，建议降低调制阶数或增加纠错编码强度。"
@@ -3053,11 +3187,8 @@ def main():
             cb_exit_hidden()
         
     def cb_next_level():
-        nonlocal level_complete, sim_result, current_mod, current_code, is_animating, path_indices, energy, has_laser_tech, transmission_stats_until
+        nonlocal level_complete, sim_result, current_mod, current_code, is_animating, path_indices, has_laser_tech, transmission_stats_until
         global current_state, g_tech_unlock_level
-        
-        # Award Energy (Up to 10 max)
-        energy = min(10, energy + 2)
 
         # Get the level we JUST succeeded.
         completed_lvl = level_mgr.get_current_level()
@@ -3092,6 +3223,7 @@ def main():
                     g_tech_unlock_level = completed_lvl
                 else:
                     current_state = STATE_BRIEFING
+                    assign_pending_weather(level_mgr.get_current_level())
             else:
                 # 游戏通关：跳转到致谢屏幕 (方案 C)
                 global credits_scroll_y
@@ -3138,7 +3270,7 @@ def main():
 
     def cb_restart_level():
         global current_state, g_game_stats, g_hidden_level_visited, num_repaired_satellites, g_original_level, g_was_level_complete
-        nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts, transmission_stats_until
+        nonlocal path_indices, sim_result, level_complete, is_animating, hidden_attempts, transmission_stats_until
         g_game_stats["total_retries"] = g_game_stats.get("total_retries", 0) + 1
         
         # --- “回滚时间”重置隐藏机制，回到最初的情况 [方块要出现，Sat-X要消失] ---
@@ -3164,7 +3296,6 @@ def main():
         sim_result = None
         level_complete = False
         is_animating = False
-        energy = 10
         transmission_stats_until = 0
         current_state = STATE_LEVEL_CATALOG
 
@@ -3280,6 +3411,7 @@ def main():
              g_tech_unlock_level = g_conclusion_level
         else:
              current_state = STATE_BRIEFING
+             assign_pending_weather(level_mgr.get_current_level())
         g_conclusion_level = None
 
     btn_conclusion_ok = Button(WINDOW_WIDTH - 250, WINDOW_HEIGHT - 100, 200, 60, "继续", cb_finish_conclusion, (0, 180, 255))
@@ -3296,6 +3428,46 @@ def main():
     def cb_close_analysis():
         nonlocal show_analysis
         show_analysis = False
+
+    def cb_sat_pick_basic():
+        nonlocal sat_selected_type
+        sat_selected_type = "basic"
+
+    def cb_sat_pick_advanced():
+        nonlocal sat_selected_type
+        sat_selected_type = "advanced"
+
+    def cb_sat_pick_laser():
+        nonlocal sat_selected_type
+        sat_selected_type = "laser"
+
+    def cb_sat_confirm():
+        nonlocal sat_message
+        if sat_deployment is None:
+            sat_message = "部署系统未初始化"
+            return
+        if sat_selected_pos is None:
+            sat_message = "请先在可部署区域点击一个位置"
+            return
+        result = sat_deployment.deploy_satellite(sat_selected_pos, sat_selected_type)
+        if not result.success:
+            sat_message = result.message
+            return
+        ok, _ = budget_manager.spend(result.cost, f"卫星部署 {sat_selected_type}")
+        if not ok:
+            sat_message = "预算同步失败，请重试"
+            return
+        sat_message = f"{result.message}，消耗 {result.cost}"
+
+    def cb_sat_skip():
+        proceed_to_mission_start()
+
+    def cb_sat_done():
+        nonlocal sat_message
+        if sat_deployment and sat_network:
+            appended = sat_network.apply_deployment(sat_deployment.deployed_satellites)
+            sat_message = f"已部署并写入网络: {appended} 颗"
+        proceed_to_mission_start()
 
     # TUTORIAL TRACKING VARS
     rect_mod_bpsk = pygame.Rect(0,0,0,0)
@@ -3315,7 +3487,7 @@ def main():
     # Original: Analysis was above KV.
     y_btn_analysis = y_btn_kv - 60
     
-    btn_tx = Button(hud_x_base, y_btn_tx, hud_width_eff, 50, "广播序列 (-0.1 能源)", cb_run_sim, (40, 120, 60))
+    btn_tx = Button(hud_x_base, y_btn_tx, hud_width_eff, 50, "发射信号 (消耗预算)", cb_run_sim, (40, 120, 60))
     btn_next = Button(hud_x_base, y_btn_tx, hud_width_eff, 50, "跳转扇区 >>", cb_next_level, (80, 80, 180))
     btn_knowledge = Button(hud_x_base, y_btn_kv, hud_width_eff, 50, "数据库", cb_open_knowledge_menu, (50, 60, 70))
     btn_analysis = Button(hud_x_base, y_btn_analysis, hud_width_eff, 50, "查看黑匣子", cb_open_analysis, (60, 60, 100))
@@ -3332,6 +3504,12 @@ def main():
     
     btn_close_report = Button(WINDOW_WIDTH // 2 - 100, WINDOW_HEIGHT // 2 + 300, 200, 50, "关闭显示", cb_close_analysis, (150, 50, 50))
     btn_exit_hidden = Button(20, 90, 100, 40, "退出", cb_exit_hidden, (150, 50, 50)) # Moved down to avoid overlap
+    btn_sat_basic = Button(MAP_WIDTH + 20, 110, HUD_WIDTH - 40, 44, "基础卫星", cb_sat_pick_basic, (45, 65, 80))
+    btn_sat_advanced = Button(MAP_WIDTH + 20, 162, HUD_WIDTH - 40, 44, "高级卫星", cb_sat_pick_advanced, (45, 65, 80))
+    btn_sat_laser = Button(MAP_WIDTH + 20, 214, HUD_WIDTH - 40, 44, "激光卫星", cb_sat_pick_laser, (45, 65, 80))
+    btn_sat_confirm = Button(MAP_WIDTH + 20, WINDOW_HEIGHT - 170, HUD_WIDTH - 40, 46, "确认发射", cb_sat_confirm, (40, 120, 80))
+    btn_sat_skip = Button(MAP_WIDTH + 20, WINDOW_HEIGHT - 116, (HUD_WIDTH - 50) // 2, 44, "跳过部署", cb_sat_skip, (70, 70, 90))
+    btn_sat_done = Button(MAP_WIDTH + 30 + (HUD_WIDTH - 50) // 2, WINDOW_HEIGHT - 116, (HUD_WIDTH - 50) // 2, 44, "完成部署", cb_sat_done, (70, 100, 140))
 
     while True:
         level = level_mgr.get_current_level()
@@ -3380,6 +3558,10 @@ def main():
             if e.type == pygame.MOUSEWHEEL and current_state == STATE_ACHIEVEMENTS:
                 global g_achievement_scroll_y
                 g_achievement_scroll_y = max(0, g_achievement_scroll_y - e.y * 48)
+            if e.type == pygame.MOUSEWHEEL and current_state == STATE_PLAYING:
+                mx, _ = pygame.mouse.get_pos()
+                if mx >= MAP_WIDTH:
+                    hud_scroll_y = max(0, min(hud_scroll_max, hud_scroll_y - e.y * 36))
             
             # --- Intro States Logic ---
             if current_state in [STATE_INTRO_1, STATE_INTRO_2]:
@@ -3406,8 +3588,10 @@ def main():
                         if rect.collidepoint(e.pos):
                             level_mgr.current_level_idx = idx
                             current_state = STATE_BRIEFING
-                            if level_mgr.get_current_level():
-                                play_bgm(get_level_music(level_mgr.get_current_level().get('id', 0)))
+                            current_level = level_mgr.get_current_level()
+                            if current_level:
+                                assign_pending_weather(current_level)
+                                play_bgm(get_level_music(current_level.get('id', 0)))
                             break
             elif current_state == STATE_SETTINGS:
                 if slider_vol.handle_event(e):
@@ -3439,6 +3623,20 @@ def main():
                 btn_briefing_kv.handle_event(e)
                 if level.get('id') == 'HIDDEN_SAT_ARRAY':
                     btn_exit_hidden.handle_event(e)
+            elif current_state == STATE_SATELLITE_DEPLOYMENT:
+                btn_sat_basic.handle_event(e)
+                btn_sat_advanced.handle_event(e)
+                btn_sat_laser.handle_event(e)
+                btn_sat_confirm.handle_event(e)
+                btn_sat_skip.handle_event(e)
+                btn_sat_done.handle_event(e)
+                if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1 and sat_deployment is not None:
+                    px1, px2 = sat_deployment.position_range["x"]
+                    py1, py2 = sat_deployment.position_range["y"]
+                    mx, my = e.pos
+                    if px1 <= mx <= px2 and py1 <= my <= py2:
+                        sat_selected_pos = (mx, my)
+                        sat_message = f"已选位置: ({mx}, {my})"
             
             elif current_state == STATE_TECH_UNLOCK:
                 btn_tech_ok.handle_event(e)
@@ -3472,11 +3670,11 @@ def main():
                             level_complete = False
                             is_animating = False
                             has_laser_tech = True
-                            energy = 9999
                             level = level_mgr.get_current_level()
                             if level:
                                 current_mod = level['available_mods'][0]
                                 current_code = level.get('available_codes', ["None"])[0]
+                                assign_pending_weather(level)
                             current_state = STATE_BRIEFING
                             break
                 # 第一关教学：误码率步骤中”点击任意处以继续”（点击到”回滚时间”按钮时交给按钮处理，不视为继续）
@@ -3502,6 +3700,7 @@ def main():
                                 global g_original_level
                                 g_original_level = level_mgr.levels[level_mgr.current_level_idx]
                                 level_mgr.levels[level_mgr.current_level_idx] = hidden_lvl
+                                assign_pending_weather(hidden_lvl)
                                 current_state = STATE_BRIEFING
                                 path_indices = []
                                 is_animating = False
@@ -3547,8 +3746,6 @@ def main():
                             for rect, proto in ui_protocol_rects:
                                 if rect.collidepoint((mx, my)):
                                     set_protocol(proto)
-                            if weather_cycle_rect.collidepoint((mx, my)):
-                                cycle_weather()
                             for rect, d_method in ui_decoder_rects:
                                 if rect.collidepoint((mx, my)): set_polar_method(d_method)
                             for rect, tech in ui_tech_rects:
@@ -3603,6 +3800,24 @@ def main():
             btn_briefing_kv.draw(screen)
             if level.get('id') == 'HIDDEN_SAT_ARRAY':
                 btn_exit_hidden.draw(screen)
+        elif current_state == STATE_SATELLITE_DEPLOYMENT:
+            if sat_deployment is not None:
+                draw_satellite_deployment_screen(
+                    screen,
+                    level,
+                    sat_deployment,
+                    sat_selected_type,
+                    sat_selected_pos,
+                    sat_message,
+                    btn_sat_confirm,
+                    btn_sat_skip,
+                    btn_sat_done,
+                )
+                btn_sat_basic.draw(screen)
+                btn_sat_advanced.draw(screen)
+                btn_sat_laser.draw(screen)
+            else:
+                current_state = STATE_BRIEFING
         elif current_state == STATE_TECH_UNLOCK:
             draw_tech_unlock_screen(screen, g_tech_unlock_level, btn_tech_ok)
         elif current_state == STATE_LETTER_VIEW:
@@ -3705,7 +3920,14 @@ def main():
                         # 开启调试模式：显示实时预览 SNR
                         # 注意：隐藏关不显示 SNR，由玩家盲测
                         if level.get('id') != 'HIDDEN_SAT_ARRAY':
-                            snr_temp = calculate_path_snr(last_node['pos'], (mx,my), level.get('tx_power', 60), level=level, idx1=last_node_idx, idx2=hover_idx)
+                            snr_temp = calculate_path_snr(
+                                last_node['pos'],
+                                (mx, my),
+                                power_slider.current_power,
+                                level=level,
+                                idx1=last_node_idx,
+                                idx2=hover_idx,
+                            )
                             
                             color_snr = (255, 200, 50) if hover_idx is not None else (150, 150, 150)
                             snr_surf = font.render(f"Link SNR: {snr_temp:.1f}dB", True, color_snr)
@@ -3833,16 +4055,13 @@ def main():
             # 横线再下移，与文字、关卡内容留足间距
             sep_y = 82
             pygame.draw.line(screen, (50, 55, 65), (0, sep_y), (MAP_WIDTH, sep_y), 1)
-            # 右：能源 + 预算 + 天气 + 回滚按钮
-            e_color = (100, 255, 255) if energy > 0 else (255, 50, 50)
-            pwr_surf = font.render(f"PWR: {energy}/10", True, e_color)
+            # 右：预算 + 天气 + 回滚按钮
             pwr_x = MAP_WIDTH - 220
-            screen.blit(pwr_surf, (pwr_x, line1_y + 4))
             budget_surf = label_font.render(f"预算: {budget_manager.current_budget}  已消耗: {budget_manager.spent_this_level}", True, (255, 215, 120))
-            screen.blit(budget_surf, (pwr_x - 120, line2_y + 2))
+            screen.blit(budget_surf, (pwr_x - 120, line1_y + 8))
             weather_name = weather_system.get_weather_info().name
             weather_surf = label_font.render(f"天气: {weather_name}", True, (170, 210, 255))
-            screen.blit(weather_surf, (pwr_x - 120, line2_y + 22))
+            screen.blit(weather_surf, (pwr_x - 120, line2_y + 12))
             if level.get('id') != 'HIDDEN_SAT_ARRAY':
                 btn_restart_level.draw(screen)
 
@@ -3856,9 +4075,11 @@ def main():
             bx = MAP_WIDTH
             pygame.draw.rect(screen, (25, 25, 30), (bx, 0, HUD_WIDTH, WINDOW_HEIGHT))
             pygame.draw.line(screen, ACCENT_COLOR, (bx, 0), (bx, WINDOW_HEIGHT), 2)
+            hud_content_clip = pygame.Rect(bx, 92, HUD_WIDTH, WINDOW_HEIGHT - 92)
+            screen.set_clip(hud_content_clip)
             
             # --- 1. Constellation Monitor (Moved UP) ---
-            cy_base = 40
+            cy_base = 40 - hud_scroll_y
             screen.blit(label_font.render("星图投影 (Star Chart)", True, ACCENT_COLOR), (bx + 15, cy_base))
             
             cy_box = cy_base + 20 # 105
@@ -3956,7 +4177,7 @@ def main():
             weather_cycle_rect = pygame.Rect(bx + 10, y, HUD_WIDTH - 20, 28)
             pygame.draw.rect(screen, (55, 65, 80), weather_cycle_rect, border_radius=4)
             pygame.draw.rect(screen, (110, 130, 160), weather_cycle_rect, 1, border_radius=4)
-            wtxt = label_font.render(f"天气: {w_info.name}  (点击切换)", True, (215, 230, 255))
+            wtxt = label_font.render(f"天气: {w_info.name}  (本关随机固定)", True, (215, 230, 255))
             screen.blit(wtxt, (weather_cycle_rect.x + 10, weather_cycle_rect.centery - wtxt.get_height() // 2))
             y += 34
 
@@ -3974,18 +4195,10 @@ def main():
             screen.blit(ptxt, (bx + 10, y + 30))
             y += 56
 
-            # System Status (Energy + Laser + Polar Decoder)
-            screen.blit(label_font.render("生命维持/能源 (Life/Power Support)", True, ACCENT_COLOR), (bx+10, y))
+            # System Status
+            screen.blit(label_font.render("系统状态 (System Status)", True, ACCENT_COLOR), (bx+10, y))
             y += 25
-            
-            # Energy Display
-            e_str = f"反应堆功率: {energy} / 10"
-            screen.blit(font.render(e_str, True, (255, 200, 50)), (bx+20, y))
-            # Energy Bar
-            pygame.draw.rect(screen, (40, 40, 40), (bx+150, y+5, 200, 15))
-            e_pct = max(0, min(1, energy / 10.0))
-            pygame.draw.rect(screen, (255, 200, 50), (bx+150, y+5, int(200*e_pct), 15))
-            
+            screen.blit(font.render(f"可用预算: {budget_manager.current_budget}", True, (255, 200, 50)), (bx+20, y))
             y += 30
 
             # Decoder / Tech Row
@@ -4017,7 +4230,7 @@ def main():
                 pygame.draw.rect(screen, col_t, r_tech, border_radius=4)
                 if laser_module_active: pygame.draw.rect(screen, (255, 100, 100), r_tech, 1, border_radius=4)
                 
-                status_str = "LASER MODULE: ACTIVE (-1.0 Energy)" if laser_module_active else "LASER MODULE: STANDBY"
+                status_str = "LASER MODULE: ACTIVE (+120预算)" if laser_module_active else "LASER MODULE: STANDBY"
                 t_surf = label_font.render(status_str, True, (255,255,255))
                 screen.blit(t_surf, (r_tech.centerx - t_surf.get_width()//2, r_tech.centery - t_surf.get_height()//2))
                 y += 40
@@ -4029,7 +4242,7 @@ def main():
             pygame.draw.rect(screen, (18, 22, 28), (bx+10, y, HUD_WIDTH-20, preview_h), border_radius=6)
             pygame.draw.rect(screen, (50, 60, 75), (bx+10, y, HUD_WIDTH-20, preview_h), 1, border_radius=6)
             screen.blit(label_font.render("当前配置预览", True, ACCENT_COLOR), (bx+18, y+6))
-            snr_preview = level.get('snr_db', 5)
+            snr_preview = level.get('snr_db', 5) + (power_slider.current_power - 30.0) * 2.0
             est_ber = estimate_ber(snr_preview, current_mod or "BPSK", current_code)
             target_ber = level['target_ber']
             star_num = estimate_stars(est_ber, target_ber)
@@ -4178,6 +4391,11 @@ def main():
                         if r.collidepoint(mouse_pos):
                             hover_tooltip = TOOLTIPS.get(name, None)
                             break
+                if hover_tooltip is None:
+                    for r, name in ui_protocol_rects:
+                        if r.collidepoint(mouse_pos):
+                            hover_tooltip = TOOLTIPS.get(name, None)
+                            break
                 if hover_tooltip:
                     draw_tooltip(screen, hover_tooltip, mouse_pos, label_font)
 
@@ -4280,6 +4498,9 @@ def main():
                 screen.blit(font.render(f"最终误码率: {ber:.4f}", True, (220, 220, 220)), (box_rect.x + 25, box_rect.y + 106))
                 progress = sim_result.get("segment_progress", 0.0)
                 screen.blit(label_font.render(f"分段进度: {int(progress * 100)}%", True, (180, 220, 255)), (box_rect.x + 190, box_rect.y + 106))
+            hud_content_bottom = y_diag + log_box_h + hud_scroll_y
+            hud_scroll_max = max(0, int(hud_content_bottom - (WINDOW_HEIGHT - 120)))
+            screen.set_clip(None)
 
         # 阶段三 3.1：成就小型通知（成就.md 4.3，右上角滑入/2s 停留/滑出，不阻塞）
         update_achievement_notification(pygame.time.get_ticks())

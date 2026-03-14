@@ -167,6 +167,38 @@ def test_phase1_phase2_systems():
     print("OK 阶段1/2系统：预算/天气/协议/功率滑块")
 
 
+def test_phase3_satellite_system():
+    """验证阶段3核心系统：卫星部署与动态网络写入。"""
+    from satellite_system import SatelliteDeployment, DynamicNetwork
+
+    level = {
+        "nodes": [
+            {"name": "Src", "pos": (100, 400), "type": "src"},
+            {"name": "Dst", "pos": (800, 400), "type": "dest"},
+        ],
+        "satellite_deployment": {
+            "enabled": True,
+            "position_range": {"x": (200, 700), "y": (100, 700)},
+            "reference_pos": (100, 400),
+            "cost_per_distance": 1.5,
+            "max_satellites": 2,
+        },
+    }
+    dep = SatelliteDeployment(level, available_budget=1200)
+    ok = dep.can_deploy((300, 300), "basic")
+    assert ok
+    res = dep.deploy_satellite((300, 300), "basic")
+    assert res.success and res.cost > 0
+    bad = dep.deploy_satellite((50, 50), "basic")
+    assert not bad.success
+
+    net = DynamicNetwork(level)
+    added = net.apply_deployment(dep.deployed_satellites)
+    assert added >= 1
+    assert any(n.get("is_player_satellite") for n in level["nodes"])
+    print("OK 阶段3系统：卫星部署与节点写入")
+
+
 def main():
     test_achievement_images()
     test_achievement_image_files()
@@ -174,6 +206,7 @@ def main():
     test_load_progress_normalize()
     test_polar_unlock_logic()
     test_phase1_phase2_systems()
+    test_phase3_satellite_system()
     print("--- 全部检查通过 ---")
     # 若存在且可导入，再跑原测试（需要 pygame）
     try:
