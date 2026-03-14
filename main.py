@@ -7,6 +7,11 @@ from dsp_engine import DSPEngine as dsp
 from levels import LevelManager
 from achievements import AchievementManager, ACHIEVEMENTS, CATEGORY_NAMES
 from tech_tree import draw_tech_tree_screen
+from budget_system import BudgetManager, calculate_level_reward, calculate_transmission_cost
+from weather_system import WeatherSystem
+from protocol_system import ProtocolSystem
+from tech_balance import recommend_tech_combo
+from transmission_control import PowerSlider, SegmentedTransmission
 
 # --- 初始化 ---
 pygame.init()
@@ -156,6 +161,7 @@ g_achievement_manager = AchievementManager()
 g_achievement_popup_queue = []  # 待显示的成就 id 列表（成就.md 4.3 小型通知依次显示）
 g_achievement_notif_state = None  # 当前通知动画状态: {"ach_id", "phase", "start_ticks", "x_offset"}
 g_achievement_scroll_y = 0  # 成就列表界面垂直滚动偏移（像素）
+g_achievement_image_cache = {}  # {rel_path: Surface} 隐藏成就图片缓存
 g_level_start_time = 0  # 进入关卡时的 ticks，用于计算用时
 
 # 成就小型通知参数（成就.md 4.3：右上角、滑入 2s 停留 滑出、不阻塞）
@@ -193,7 +199,16 @@ def load_progress():
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         level_idx = data.get("current_level_idx", 0)
-        stars_dict = data.get("level_stars", {})
+        raw_stars = data.get("level_stars", {})
+        # 存档中 key 可能为字符串 "1","2"，关卡 id 为 int，统一为 int 避免选关时星星不显示
+        stars_dict = {}
+        for k, v in (raw_stars or {}).items():
+            try:
+                key = int(k) if isinstance(k, str) and k.isdigit() else k
+                if isinstance(key, int):
+                    stars_dict[key] = v
+            except (ValueError, TypeError):
+                pass
         game_stats = data.get("game_stats")
         achievements_list = data.get("achievements")
         return (level_idx, stars_dict, game_stats, achievements_list)
@@ -343,6 +358,7 @@ g_tech_unlock_level = None
 g_conclusion_level = None # 存储结论画面关卡信息
 g_original_level = None # 用于存储进入隐藏关前的原始关卡数据
 g_hidden_level_visited = False # 追踪是否已访问隐藏关
+g_was_level_complete = False # 记录进入隐藏关前是否已完成当前关卡
 g_letter_scroll_idx = 0 # 信件打字机效果索引
 g_edu_slides = [] # Store current slides
 g_edu_slide_idx = 0
@@ -973,20 +989,33 @@ def draw_image_fit(surface, img_path, center_pos, max_size):
         if scale < 1.0 or scale > 1.0: # Always scale to fit box nicely
              new_size = (int(iw*scale), int(ih*scale))
              img = pygame.transform.smoothscale(img, new_size)
-        
         rect = img.get_rect(center=center_pos)
         surface.blit(img, rect)
-        
-        # Draw border
-        pygame.draw.rect(surface, (100, 150, 200), rect, 1)
-        
-        # Draw Label (Filename as caption?)
-        # caption = os.path.splitext(os.path.basename(img_path))[0]
-        # cap_surf = label_font.render(caption, True, (150,150,150))
-        # surface.blit(cap_surf, (rect.centerx - cap_surf.get_width()//2, rect.bottom + 5))
-        
     except Exception as e:
         print(f"Failed to load image {img_path}: {e}")
+
+
+def load_achievement_image(rel_path, max_w, max_h):
+    """加载成就图片并缩放到 (max_w, max_h) 内，带缓存。返回 Surface 或 None。"""
+    global g_achievement_image_cache
+    key = (rel_path, max_w, max_h)
+    if key in g_achievement_image_cache:
+        return g_achievement_image_cache[key]
+    full_path = resource_path(rel_path)
+    if not os.path.exists(full_path):
+        return None
+    try:
+        img = pygame.image.load(full_path).convert_alpha()
+        iw, ih = img.get_size()
+        scale = min(max_w / iw, max_h / ih, 1.0)
+        new_size = (int(iw * scale), int(ih * scale))
+        if new_size[0] < 1 or new_size[1] < 1:
+            return None
+        img = pygame.transform.smoothscale(img, new_size)
+        g_achievement_image_cache[key] = img
+        return img
+    except Exception:
+        return None
 
 # 开始页背景：蓝色星星划过特效（持久化列表，每帧更新）
 _g_start_stars = []
@@ -1180,7 +1209,9 @@ def draw_briefing_screen(surface, level, btn):
         surface.blit(lbl, (100, y_reward))
         surface.blit(val, (100, y_reward + 25))
     # 已获星级 (阶段 2.2)
-    earned = g_level_stars.get(level.get('id'), 0)
+    lid = level.get('id')
+    key = int(lid) if isinstance(lid, str) and (lid or "").isdigit() else lid
+    earned = g_level_stars.get(key, 0)
     star_y = y_reward + 55
     surface.blit(label_font.render("已获星级:", True, (255, 200, 50)), (100, star_y))
     GOLD, GRAY = (255, 200, 50), (80, 80, 80)
@@ -1754,9 +1785,16 @@ def draw_achievement_notification(surface, font_obj, label_font_obj):
     # 🎉 成就解锁！
     title_surf = label_font_obj.render("成就解锁！", True, (255, 200, 50))
     surface.blit(title_surf, (x + 16, y + 12))
-    # 图标 + 名称
-    name_surf = font_obj.render(ach["icon"] + " " + ach["name"], True, (255, 255, 255))
-    surface.blit(name_surf, (x + 16, y + 38))
+    # 图标/图片 + 名称：有隐藏成就图片则显示图片，否则用 emoji 图标
+    img_rel = ach.get("image")
+    name_x = x + 16
+    if img_rel:
+        img_surf = load_achievement_image(img_rel, 44, 44)
+        if img_surf:
+            surface.blit(img_surf, (name_x, y + 34))
+            name_x += 52
+    name_surf = font_obj.render((ach["icon"] + " " if not img_rel else "") + ach["name"], True, (255, 255, 255))
+    surface.blit(name_surf, (name_x, y + 38))
 
 
 def draw_achievements_screen(surface, btn_back):
@@ -1810,7 +1848,15 @@ def draw_achievements_screen(surface, btn_back):
             r = pygame.Rect(80, y, WINDOW_WIDTH - 160, 56)
             pygame.draw.rect(surface, (28, 32, 40), r, border_radius=6)
             pygame.draw.rect(surface, (50, 60, 75), r, 1, border_radius=6)
-            surface.blit(font.render(f"{icon} {name}", True, color), (100, y + 8))
+            # 已解锁且存在隐藏成就图片时显示图片，否则显示图标
+            text_x = 100
+            if unlocked and ach_data.get("image"):
+                img_surf = load_achievement_image(ach_data["image"], 48, 48)
+                if img_surf:
+                    surface.blit(img_surf, (100, y + 4))
+                    text_x = 158
+            name_text = (f"{icon} " if text_x == 100 else "") + name
+            surface.blit(font.render(name_text, True, color), (text_x, y + 8))
             surface.blit(label_font.render(desc, True, (150, 160, 170)), (100, y + 32))
             status = "已解锁" if unlocked else "未解锁"
             surface.blit(label_font.render(status, True, (100, 200, 120) if unlocked else (100, 100, 110)), (r.right - 90, y + 18))
@@ -1991,6 +2037,7 @@ def main():
     
     current_mod = "BPSK"
     current_code = "None"
+    selected_protocol = "udp"
     
     # New: Polar Decoding Method Selection
     current_polar_method = "SC" # Default
@@ -2011,6 +2058,8 @@ def main():
     
     ui_mod_rects = []
     ui_code_rects = []
+    ui_protocol_rects = []
+    weather_cycle_rect = pygame.Rect(0, 0, 0, 0)
     
     # UI Rects for decoding methods
     ui_decoder_rects = []
@@ -2023,6 +2072,11 @@ def main():
     # Dynamic Node Management
     # To prevent polluting the original levels.py data, we need to deep copy nodes when mission starts.
     import copy
+    budget_manager = BudgetManager(initial_budget=1000)
+    weather_system = WeatherSystem()
+    protocol_system = ProtocolSystem()
+    power_slider = PowerSlider(MAP_WIDTH + 40, 0, HUD_WIDTH - 80, min_power=10.0, max_power=70.0, current_power=30.0)
+    segmented_transmission = None
 
     def cb_new_game():
         """新游戏：覆盖存档并从第一关开场开始"""
@@ -2077,7 +2131,7 @@ def main():
             play_bgm(get_level_music(level.get('id', 0)))
 
     def start_level_play():
-        nonlocal has_satellite_array_tech, hidden_attempts, sim_result, is_animating, path_indices, has_laser_tech, current_mod, current_code
+        nonlocal has_satellite_array_tech, hidden_attempts, sim_result, is_animating, path_indices, has_laser_tech, current_mod, current_code, selected_protocol, segmented_transmission
         global current_state, g_letter_scroll_idx, g_level_start_time
 
         g_level_start_time = pygame.time.get_ticks()
@@ -2106,6 +2160,22 @@ def main():
         else:
             current_mod = lvl['available_mods'][0] if lvl.get('available_mods') else "BPSK"
             current_code = lvl.get('available_codes', ["None"])[0]
+
+        selected_protocol = "udp"
+        segmented_transmission = None
+        if isinstance(lvl.get("id"), int):
+            budget_manager.reset_level()
+            # A deterministic weather per level keeps gameplay fair and testable.
+            weather_candidates = ["clear", "cloudy", "rain", "storm", "solar_flare"]
+            weather_system.set_weather(weather_candidates[(lvl["id"] - 1) % len(weather_candidates)])
+            recommendations = recommend_tech_combo(lvl, weather_system.current_weather)
+            if recommendations and current_mod in ("BPSK", "QPSK"):
+                rec_mod = recommendations[0].get("modulation")
+                rec_code = recommendations[0].get("coding")
+                if rec_mod in lvl.get("available_mods", []):
+                    current_mod = rec_mod
+                if rec_code in lvl.get("available_codes", []):
+                    current_code = rec_code
         
         try:
             lvl_id = int(lvl.get('id', 1))
@@ -2431,8 +2501,13 @@ def main():
         return False
 
     def cb_finish_tech_unlock():
-        global current_state
-        current_state = STATE_BRIEFING
+        global current_state, g_tech_unlock_level, g_level_start_time
+        # 如果是从隐藏关卡退出并解锁技术，弹窗后直接回到那一关（PLAYING），而不是再进一次Briefing
+        if g_tech_unlock_level and g_tech_unlock_level.get('tech_unlock_info', {}).get('title', '').startswith("阵列扫描"):
+            current_state = STATE_PLAYING
+            g_level_start_time = pygame.time.get_ticks()
+        else:
+            current_state = STATE_BRIEFING
     
     def toggle_laser():
         nonlocal laser_module_active, sim_result
@@ -2453,6 +2528,18 @@ def main():
             current_code = code
             sim_result = None
             is_animating = False
+
+    def set_protocol(protocol_id):
+        nonlocal selected_protocol, sim_result, is_animating
+        if selected_protocol != protocol_id:
+            selected_protocol = protocol_id
+            sim_result = None
+            is_animating = False
+
+    def cycle_weather():
+        nonlocal sim_result
+        weather_system.cycle_weather()
+        sim_result = None
             
     def set_polar_method(method):
         nonlocal current_polar_method, sim_result
@@ -2461,7 +2548,7 @@ def main():
             sim_result = None
 
     def cb_run_sim():
-        nonlocal is_animating, anim_progress, sim_result, energy, show_analysis, hidden_attempts
+        nonlocal is_animating, anim_progress, sim_result, energy, show_analysis, hidden_attempts, segmented_transmission
         
         # Validation for Tutorial / General safety
         if current_mod is None or current_code is None:
@@ -2487,8 +2574,9 @@ def main():
                 return
             hidden_attempts += 1 # 仅在发射时增加次数
         
-        # Energy Check for Laser or Normal Transmission
+        # Energy + budget checks
         energy_cost = 1.0 if laser_module_active else 0.1
+        energy_cost = protocol_system.apply_energy_effect(selected_protocol, energy_cost)
         
         if energy >= energy_cost:
             energy -= energy_cost
@@ -2500,6 +2588,22 @@ def main():
                 "tx_txt": "ERROR",
                 "rx_syms": [], # Fixed crash 'rx_syms'
                 "failure_reason": f"能量不足 (需 {energy_cost} 能量)"
+            }
+            return
+
+        tx_cost = calculate_transmission_cost(power_slider.current_power, selected_protocol)
+        paid, _ = budget_manager.spend(
+            tx_cost,
+            f"L{level.get('id')} {selected_protocol.upper()} {power_slider.current_power:.1f}dBm",
+        )
+        if not paid:
+            sim_result = {
+                "success": False,
+                "ber": 1.0,
+                "rx_msg": "BUDGET DEPLETED",
+                "tx_txt": "ERROR",
+                "rx_syms": [],
+                "failure_reason": f"预算不足：本次发送需 {tx_cost}，当前可用 {budget_manager.current_budget}",
             }
             return
 
@@ -2534,6 +2638,7 @@ def main():
                 
         global g_game_stats
         g_game_stats["total_transmissions"] = g_game_stats.get("total_transmissions", 0) + 1
+        segmented_transmission = SegmentedTransmission(dsp.str_to_bits(level["message"]), num_segments=5)
         is_animating = True
         anim_progress = 0.0
         sim_result = None 
@@ -2639,8 +2744,15 @@ def main():
                 node_a = level['nodes'][idx_a]
                 node_b = level['nodes'][idx_b]
                 
-                # Calculate Link SNR (Updated to use Matrix)
-                snr = calculate_path_snr(node_a['pos'], node_b['pos'], level.get('tx_power', 60), level=level, idx1=idx_a, idx2=idx_b)
+                # Calculate Link SNR (Updated to use Matrix + power slider)
+                snr = calculate_path_snr(
+                    node_a['pos'],
+                    node_b['pos'],
+                    power_slider.current_power,
+                    level=level,
+                    idx1=idx_a,
+                    idx2=idx_b,
+                )
 
                 # Update logic: Laser is no longer a "mod", it's an additive effect
                 # Base modulation is used (e.g. BPSK/QPSK) 
@@ -2665,6 +2777,12 @@ def main():
                    else:
                        effective_snr += 5.0 # Default for testing
                 
+                effective_snr = weather_system.apply_snr_effects(
+                    effective_snr,
+                    current_code or "",
+                    use_laser=laser_module_active,
+                )
+
                 # Encode (Assumes same code for all hops for now)
                 enc_bits = dsp.encode_data(current_bits, current_code)
                 
@@ -2707,6 +2825,10 @@ def main():
                 
                 # Calculate Step BER
                 step_ber = dsp.calculate_ber(current_bits, hop_rx_bits)
+                step_ber = weather_system.apply_ber_effects(step_ber, current_code or "")
+                step_ber = protocol_system.apply_ber_effect(selected_protocol, step_ber)
+                if segmented_transmission:
+                    segmented_transmission.push_result(step_ber)
                 
                 steps.append({
                     "from": node_a['name'], "to": node_b['name'],
@@ -2724,7 +2846,7 @@ def main():
             # Legacy Single Hop (Level 1 etc)
             enc_bits = dsp.encode_data(raw_bits, current_code)
             tx_syms = dsp.modulate(enc_bits, current_mod)
-            snr = level.get('snr_db', 10)
+            snr = level.get('snr_db', 10) + (power_slider.current_power - 30.0)
             use_noise = True  # 所有关卡均使用噪声，由 snr_db 控制
             
             if laser_module_active:
@@ -2734,6 +2856,8 @@ def main():
                 else:
                     snr += 20.0
                 
+            snr = weather_system.apply_snr_effects(snr, current_code or "", use_laser=laser_module_active)
+
             if use_noise:
                 rx_syms = dsp.channel_awgn(tx_syms, snr)
             else:
@@ -2749,6 +2873,10 @@ def main():
 
         rx_msg = dsp.bits_to_str(final_rx_bits)
         ber = dsp.calculate_ber(raw_bits, final_rx_bits)
+        ber = weather_system.apply_ber_effects(ber, current_code or "")
+        ber = protocol_system.apply_ber_effect(selected_protocol, ber)
+        if segmented_transmission:
+            segmented_transmission.push_result(ber)
         
         # --- HACK: Level 11 (昆仑) Special Fix for Error Floor ---
         # 如果 BER 约为 0.0018 (即那个无法消除的 7 bits error)，且使用的是最强编码，则给 20% 机会直接通过
@@ -2840,21 +2968,23 @@ def main():
                 full_stats = build_stats_for_achievements(level_mgr, g_level_stars, levels_completed, g_game_stats)
                 newly = g_achievement_manager.check_achievements(full_stats)
                 g_achievement_popup_queue.extend(newly)
+                reward = calculate_level_reward(stars, level_difficulty=1.0)
+                budget_manager.earn(reward, f"L{level_id} {stars}星奖励")
             
             # Unlock Secret Reward
             if level.get('id') == "HIDDEN_SAT_ARRAY":
-                 # Inject Sat-X into future levels (8, 9, 10)
-                 # These are levels with IDs >= 8
+                 # Inject Sat-X into future levels (8, 9, 10, 11)
+                 # These are levels with IDs >= 8 and we fix the pos near Earth (origin_pos: 100, 700)
                  for subsequent_level in level_mgr.levels:
                      lid = subsequent_level.get('id')
-                     if isinstance(lid, int) and lid >= 8:
+                     if isinstance(lid, int) and lid >= 8 and 'nodes' in subsequent_level:
                          # Check if already added
                          has_x = any(n['name'] == 'Sat-X' for n in subsequent_level['nodes'])
                          if not has_x:
                              subsequent_level['nodes'].append({
                                  "name": "Sat-X", 
-                                 "pos": (150, 650), # Near Earth (100, 700)
-                                 "origin_pos": (150, 650),
+                                 "pos": (120, 680), # Near Earth (100, 700)
+                                 "origin_pos": (120, 680),
                                  "type": "relay",
                                  "is_ancient_relay": True # Flag for logic
                              })
@@ -2897,6 +3027,11 @@ def main():
             "score_breakdown": score_breakdown,
             "total_score": total_score,
             "grade": grade,
+            "protocol": selected_protocol,
+            "weather": weather_system.current_weather,
+            "tx_power": power_slider.current_power,
+            "budget": budget_manager.current_budget,
+            "segment_progress": segmented_transmission.get_progress() if segmented_transmission else 0.0,
             # Data for detailed analysis report
             "analysis_data": {
                 "raw_bits": raw_bits[:64], # Sample first 64 bits
@@ -3002,9 +3137,27 @@ def main():
         current_state = STATE_START_SCREEN
 
     def cb_restart_level():
-        global current_state, g_game_stats
+        global current_state, g_game_stats, g_hidden_level_visited, num_repaired_satellites, g_original_level, g_was_level_complete
         nonlocal path_indices, sim_result, level_complete, is_animating, energy, hidden_attempts, transmission_stats_until
         g_game_stats["total_retries"] = g_game_stats.get("total_retries", 0) + 1
+        
+        # --- “回滚时间”重置隐藏机制，回到最初的情况 [方块要出现，Sat-X要消失] ---
+        g_hidden_level_visited = False
+        num_repaired_satellites = 0
+        hidden_attempts = 0
+        g_was_level_complete = False
+        
+        # 1. 如果当前就在隐藏关里面，先将关卡结构复原
+        if g_original_level is not None:
+            level_mgr.levels[level_mgr.current_level_idx] = g_original_level
+            g_original_level = None
+            
+        # 2. 从所有关卡里剔除 Sat-X，让它消失
+        for lvl in level_mgr.levels:
+            if 'nodes' in lvl:
+                lvl['nodes'] = [n for n in lvl['nodes'] if n.get('name') != 'Sat-X']
+        # -------------------------------------------------------------------------
+        
         # 保存进度并返回关卡目录
         save_progress(level_mgr.current_level_idx, g_level_stars, g_game_stats, g_achievement_manager.save())
         path_indices = []
@@ -3014,11 +3167,6 @@ def main():
         energy = 10
         transmission_stats_until = 0
         current_state = STATE_LEVEL_CATALOG
-        current_lvl = level_mgr.get_current_level()
-        if current_lvl and current_lvl.get('id') == 'HIDDEN_SAT_ARRAY':
-            hidden_attempts = 0
-            global num_repaired_satellites
-            num_repaired_satellites = 0
 
     def cb_exit_hidden():
         global current_state, g_original_level, g_hidden_level_visited, num_repaired_satellites, g_tech_unlock_level
@@ -3037,8 +3185,8 @@ def main():
                 if not any(n['name'] == 'Sat-X' for n in g_original_level['nodes']):
                     g_original_level['nodes'].append({
                         "name": "Sat-X", 
-                        "pos": (150, 650), 
-                        "origin_pos": (150, 650),
+                        "pos": (120, 680), 
+                        "origin_pos": (120, 680),
                         "type": "relay",
                         "is_ancient_relay": True
                     })
@@ -3046,12 +3194,12 @@ def main():
                 # 注入到后续所有关卡
                 for lvl in level_mgr.levels:
                     lid = lvl.get('id')
-                    if isinstance(lid, int) and lid > 8:
+                    if isinstance(lid, int) and lid > 8 and 'nodes' in lvl:
                         if not any(n['name'] == 'Sat-X' for n in lvl['nodes']):
                             lvl['nodes'].append({
                                 "name": "Sat-X", 
-                                "pos": (150, 650), 
-                                "origin_pos": (150, 650),
+                                "pos": (120, 680), 
+                                "origin_pos": (120, 680),
                                 "type": "relay",
                                 "is_ancient_relay": True
                             })
@@ -3078,7 +3226,7 @@ def main():
             
             # 重置模拟进度
             sim_result = None
-            level_complete = False
+            level_complete = g_was_level_complete
             path_indices = []
             is_animating = False
 
@@ -3348,6 +3496,8 @@ def main():
                             map_click_consumed = True
                         elif e.button == 1:
                             if ghost_cube_visible and ghost_cube_rect.collidepoint((mx, my)):
+                                global g_was_level_complete
+                                g_was_level_complete = level_complete
                                 hidden_lvl = generate_hidden_satellite_level()
                                 global g_original_level
                                 g_original_level = level_mgr.levels[level_mgr.current_level_idx]
@@ -3374,6 +3524,7 @@ def main():
                                         break
 
                 if not map_click_consumed:
+                    power_slider.handle_event(e)
                     btn_restart_level.handle_event(e)
                     if level and level.get('id') == 'HIDDEN_SAT_ARRAY':
                         btn_exit_hidden.handle_event(e)
@@ -3391,6 +3542,11 @@ def main():
                                 if rect.collidepoint((mx, my)): set_mod(m)
                             for rect, c in ui_code_rects:
                                 if rect.collidepoint((mx, my)): set_code(c)
+                            for rect, proto in ui_protocol_rects:
+                                if rect.collidepoint((mx, my)):
+                                    set_protocol(proto)
+                            if weather_cycle_rect.collidepoint((mx, my)):
+                                cycle_weather()
                             for rect, d_method in ui_decoder_rects:
                                 if rect.collidepoint((mx, my)): set_polar_method(d_method)
                             for rect, tech in ui_tech_rects:
@@ -3462,7 +3618,7 @@ def main():
             if not is_animating and not level_complete:
                 update_planet_dynamics(level)
             
-            ui_mod_rects.clear(); ui_code_rects.clear(); ui_tech_rects.clear()
+            ui_mod_rects.clear(); ui_code_rects.clear(); ui_protocol_rects.clear(); ui_tech_rects.clear()
             screen.fill(BG_COLOR)
             
             # Map Background
@@ -3675,11 +3831,16 @@ def main():
             # 横线再下移，与文字、关卡内容留足间距
             sep_y = 82
             pygame.draw.line(screen, (50, 55, 65), (0, sep_y), (MAP_WIDTH, sep_y), 1)
-            # 右：能源 + 回滚按钮
+            # 右：能源 + 预算 + 天气 + 回滚按钮
             e_color = (100, 255, 255) if energy > 0 else (255, 50, 50)
             pwr_surf = font.render(f"PWR: {energy}/10", True, e_color)
             pwr_x = MAP_WIDTH - 220
             screen.blit(pwr_surf, (pwr_x, line1_y + 4))
+            budget_surf = label_font.render(f"预算: {budget_manager.current_budget}  已消耗: {budget_manager.spent_this_level}", True, (255, 215, 120))
+            screen.blit(budget_surf, (pwr_x - 120, line2_y + 2))
+            weather_name = weather_system.get_weather_info().name
+            weather_surf = label_font.render(f"天气: {weather_name}", True, (170, 210, 255))
+            screen.blit(weather_surf, (pwr_x - 120, line2_y + 22))
             if level.get('id') != 'HIDDEN_SAT_ARRAY':
                 btn_restart_level.draw(screen)
 
@@ -3764,6 +3925,53 @@ def main():
             num_rows_code = (len(codes) + 1) // 2 if len(codes) > 0 else 1
             y += num_rows_code * 35 + 10
 
+            # Protocol Selection (Phase 2.1)
+            screen.blit(label_font.render("PROTOCOL", True, (150,150,150)), (bx+10, y+8))
+            level_id = level.get("id")
+            safe_level_id = level_id if isinstance(level_id, int) else 1
+            available_protocols = protocol_system.get_available_protocols(safe_level_id)
+            proto_items = list(available_protocols.items())
+            proto_cols = min(2, max(1, len(proto_items)))
+            proto_w = (HUD_WIDTH - 80) // proto_cols
+            for i, (proto_id, proto_info) in enumerate(proto_items):
+                row = i // proto_cols
+                col_idx = i % proto_cols
+                py = y + row * 35
+                r = pygame.Rect(bx + 60 + col_idx * (proto_w + 5), py, proto_w, 30)
+                ui_protocol_rects.append((r, proto_id))
+                selected = proto_id == selected_protocol
+                col = (20, 110, 120) if selected else (50, 50, 60)
+                pygame.draw.rect(screen, col, r, border_radius=4)
+                if selected:
+                    pygame.draw.rect(screen, (255, 255, 255), r, 1, border_radius=4)
+                ptxt = label_font.render(f"{proto_info.name} ({proto_info.cost})", True, (235, 235, 235))
+                screen.blit(ptxt, (r.centerx - ptxt.get_width() // 2, r.centery - ptxt.get_height() // 2))
+            proto_rows = (len(proto_items) + proto_cols - 1) // proto_cols
+            y += proto_rows * 35 + 8
+
+            # Weather / Power controls (Phase 1.2 + 2.3.1)
+            w_info = weather_system.get_weather_info()
+            weather_cycle_rect = pygame.Rect(bx + 10, y, HUD_WIDTH - 20, 28)
+            pygame.draw.rect(screen, (55, 65, 80), weather_cycle_rect, border_radius=4)
+            pygame.draw.rect(screen, (110, 130, 160), weather_cycle_rect, 1, border_radius=4)
+            wtxt = label_font.render(f"天气: {w_info.name}  (点击切换)", True, (215, 230, 255))
+            screen.blit(wtxt, (weather_cycle_rect.x + 10, weather_cycle_rect.centery - wtxt.get_height() // 2))
+            y += 34
+
+            power_slider.y = y
+            slider_rect = power_slider.rect
+            pygame.draw.rect(screen, (55, 55, 60), slider_rect, border_radius=4)
+            ratio = power_slider.get_ratio()
+            handle_x = slider_rect.x + int(ratio * slider_rect.width)
+            pygame.draw.circle(screen, (0, 180, 255), (handle_x, slider_rect.centery), 10)
+            ptxt = label_font.render(
+                f"发射功率: {power_slider.current_power:.1f} dBm  成本: {calculate_transmission_cost(power_slider.current_power, selected_protocol)}",
+                True,
+                (190, 220, 250),
+            )
+            screen.blit(ptxt, (bx + 10, y + 30))
+            y += 56
+
             # System Status (Energy + Laser + Polar Decoder)
             screen.blit(label_font.render("生命维持/能源 (Life/Power Support)", True, ACCENT_COLOR), (bx+10, y))
             y += 25
@@ -3823,7 +4031,14 @@ def main():
             est_ber = estimate_ber(snr_preview, current_mod or "BPSK", current_code)
             target_ber = level['target_ber']
             star_num = estimate_stars(est_ber, target_ber)
-            screen.blit(label_font.render(f"调制: {current_mod or '—'}  编码: {current_code or '—'}", True, (200,200,200)), (bx+18, y+26))
+            screen.blit(
+                label_font.render(
+                    f"调制: {current_mod or '—'}  编码: {current_code or '—'}  协议: {selected_protocol.upper()}",
+                    True,
+                    (200,200,200),
+                ),
+                (bx+18, y+26),
+            )
             screen.blit(label_font.render(f"预计误码率: ~{est_ber:.4f}", True, (180,200,180)), (bx+18, y+46))
             star_str = "★" * star_num + "☆" * (5 - star_num)
             screen.blit(label_font.render(f"建议: {star_str}", True, (255, 200, 50)), (bx+18, y+66))
@@ -4076,6 +4291,8 @@ def main():
                 screen.blit(font.render(f"✓ 正确: {correct} 个", True, SUCCESS_COLOR), (box_rect.x + 25, box_rect.y + 58))
                 screen.blit(font.render(f"✗ 错误: {error} 个", True, ERROR_COLOR), (box_rect.x + 25, box_rect.y + 82))
                 screen.blit(font.render(f"最终误码率: {ber:.4f}", True, (220, 220, 220)), (box_rect.x + 25, box_rect.y + 106))
+                progress = sim_result.get("segment_progress", 0.0)
+                screen.blit(label_font.render(f"分段进度: {int(progress * 100)}%", True, (180, 220, 255)), (box_rect.x + 190, box_rect.y + 106))
 
         # 阶段三 3.1：成就小型通知（成就.md 4.3，右上角滑入/2s 停留/滑出，不阻塞）
         update_achievement_notification(pygame.time.get_ticks())
