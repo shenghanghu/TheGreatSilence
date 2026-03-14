@@ -29,18 +29,32 @@ pygame.display.set_caption("The Great Silence - 大静默")
 clock = pygame.time.Clock()
 
 # --- 颜色定义 ---
-BG_COLOR = (10, 12, 16)
-PANEL_COLOR = (20, 24, 30)
-MAP_BG_COLOR = (15, 18, 22)
-ACCENT_COLOR = (0, 180, 255)
-SUCCESS_COLOR = (50, 200, 100)
+BG_COLOR = (6, 12, 6)
+PANEL_COLOR = (10, 22, 10)
+MAP_BG_COLOR = (8, 16, 8)
+ACCENT_COLOR = (95, 255, 128)
+SUCCESS_COLOR = (130, 255, 150)
 ERROR_COLOR = (230, 80, 80)
-TEXT_COLOR = (220, 220, 220)
+TEXT_COLOR = (150, 255, 170)
+TERMINAL_DIM = (28, 72, 34)
+TERMINAL_LINE = (72, 155, 90)
+TERMINAL_GLOW = (120, 255, 150)
+
+ENABLE_PIPBOY_THEME = True
+ENABLE_CRT = True
 
 # --- 字体设置 ---
 def get_font_name():
     # Attempt to load system font path directly
-    preferred_fonts = ['Microsoft YaHei', 'SimHei', 'SimSun', 'Arial Unicode MS']
+    preferred_fonts = [
+        'Cascadia Mono',
+        'Consolas',
+        'Lucida Console',
+        'Microsoft YaHei',
+        'SimHei',
+        'SimSun',
+        'Arial Unicode MS',
+    ]
     for f in preferred_fonts:
         try:
             if pygame.font.match_font(f):
@@ -787,7 +801,7 @@ def draw_constellation(surface, symbols, cx, cy, scale=60):
 
 # --- Button ---
 class Button:
-    def __init__(self, x, y, w, h, text, callback=None, color=(60, 60, 70), hover_color=(80, 80, 90)):
+    def __init__(self, x, y, w, h, text, callback=None, color=(22, 42, 26), hover_color=(28, 58, 34)):
         self.rect = pygame.Rect(x, y, w, h)
         self.text = text
         self.callback = callback
@@ -797,9 +811,12 @@ class Button:
 
     def draw(self, surface):
         c = self.hover_color if self.is_hovered else self.base_color
-        pygame.draw.rect(surface, c, self.rect, border_radius=5)
-        pygame.draw.rect(surface, (255, 255, 255), self.rect, 1, border_radius=5)
-        txt = font.render(self.text, True, (255, 255, 255))
+        border_color = TERMINAL_GLOW if self.is_hovered else TERMINAL_LINE
+        border_w = 2 if self.is_hovered else 1
+        pygame.draw.rect(surface, c, self.rect, border_radius=2)
+        pygame.draw.rect(surface, border_color, self.rect, border_w, border_radius=2)
+        txt_col = TERMINAL_GLOW if self.is_hovered else TEXT_COLOR
+        txt = font.render(self.text, True, txt_col)
         txt_rect = txt.get_rect(center=self.rect.center)
         surface.blit(txt, txt_rect)
 
@@ -821,8 +838,8 @@ class Slider:
 
     def draw(self, surface):
         # Draw track
-        pygame.draw.rect(surface, (40, 50, 60), self.rect, border_radius=5)
-        pygame.draw.rect(surface, (100, 120, 140), self.rect, 1, border_radius=5)
+        pygame.draw.rect(surface, (18, 38, 24), self.rect, border_radius=2)
+        pygame.draw.rect(surface, TERMINAL_LINE, self.rect, 1, border_radius=2)
         
         # Calculate handle position
         pct = (self.val - self.min_val) / (self.max_val - self.min_val)
@@ -830,8 +847,8 @@ class Slider:
         handle_rect = pygame.Rect(handle_x, self.rect.y, 20, self.rect.height)
         
         # Draw handle
-        color = (0, 180, 255) if self.dragging else (150, 200, 220)
-        pygame.draw.rect(surface, color, handle_rect, border_radius=4)
+        color = TERMINAL_GLOW if self.dragging else (115, 215, 138)
+        pygame.draw.rect(surface, color, handle_rect, border_radius=2)
 
     def handle_event(self, event):
         changed = False
@@ -853,6 +870,59 @@ class Slider:
         rel_x = mouse_x - self.rect.x - 10 # Offset for handle center
         pct = max(0, min(1, rel_x / (self.rect.width - 20)))
         self.val = self.min_val + pct * (self.max_val - self.min_val)
+
+
+_crt_scanline_surface = None
+_crt_vignette_surface = None
+_crt_cached_size = (0, 0)
+
+
+def _build_crt_cache(size):
+    """Build scanline and vignette layers once per resolution."""
+    global _crt_scanline_surface, _crt_vignette_surface, _crt_cached_size
+
+    w, h = size
+    _crt_cached_size = size
+
+    _crt_scanline_surface = pygame.Surface((w, h), pygame.SRCALPHA)
+    for y in range(0, h, 3):
+        pygame.draw.line(_crt_scanline_surface, (0, 0, 0, 42), (0, y), (w, y), 1)
+
+    _crt_vignette_surface = pygame.Surface((w, h), pygame.SRCALPHA)
+    layers = 26
+    for i in range(layers):
+        alpha = int(6 + i * 2.8)
+        inset_x = int((i / layers) * (w * 0.2))
+        inset_y = int((i / layers) * (h * 0.2))
+        rect = pygame.Rect(inset_x, inset_y, w - inset_x * 2, h - inset_y * 2)
+        if rect.width <= 0 or rect.height <= 0:
+            continue
+        pygame.draw.rect(_crt_vignette_surface, (0, 0, 0, alpha), rect, width=3)
+
+
+def draw_crt_overlay(surface):
+    """Draw a lightweight CRT overlay without touching game logic."""
+    if not ENABLE_CRT:
+        return
+
+    size = surface.get_size()
+    if _crt_scanline_surface is None or _crt_cached_size != size:
+        _build_crt_cache(size)
+
+    # Gentle green phosphor tint.
+    tint = pygame.Surface(size, pygame.SRCALPHA)
+    tint.fill((36, 255, 90, 12))
+    surface.blit(tint, (0, 0))
+    surface.blit(_crt_scanline_surface, (0, 0))
+
+    # Subtle noise sparkles to avoid static look.
+    for _ in range(150):
+        x = np.random.randint(0, size[0])
+        y = np.random.randint(0, size[1])
+        value = np.random.randint(85, 132)
+        surface.set_at((x, y), (value, min(255, value + 70), value))
+
+    surface.blit(_crt_vignette_surface, (0, 0))
 
 
 # --- Visual Effects Classes ---
@@ -1065,27 +1135,32 @@ def _update_draw_start_stars(surface):
         if s['x'] < -4:
             s['x'] = WINDOW_WIDTH + 4
             s['y'] = np.random.randint(0, WINDOW_HEIGHT)
-        r = int(80 * s['bright'])
-        g = int(160 * s['bright'])
-        b = int(255 * s['bright'])
+        r = int(40 * s['bright'])
+        g = int(220 * s['bright'])
+        b = int(90 * s['bright'])
         color = (r, g, b)
         pygame.draw.circle(surface, color, (int(s['x']), int(s['y'])), s['size'])
 
 def draw_start_screen(surface, btn_new_game, btn_continue, btn_level_catalog, btn_kv, btn_settings, btn_achievements=None):
     surface.fill(BG_COLOR)
     _update_draw_start_stars(surface)
-    
+
+    # Top terminal tabs (Pip-Boy visual anchor)
+    tabs = label_font.render("STAT   INV   DATA   MAP   RADIO", True, TERMINAL_GLOW)
+    surface.blit(tabs, (WINDOW_WIDTH // 2 - tabs.get_width() // 2, 86))
+    pygame.draw.line(surface, TERMINAL_LINE, (WINDOW_WIDTH // 2 - 280, 108), (WINDOW_WIDTH // 2 + 280, 108), 1)
+
     # Title
     t1 = header_font.render("THE GREAT SILENCE", True, ACCENT_COLOR)
-    t2 = header_font.render("大静默", True, (255, 255, 255))
+    t2 = header_font.render("大静默", True, TEXT_COLOR)
     mx = WINDOW_WIDTH // 2
     surface.blit(t1, (mx - t1.get_width() // 2, 200))
     surface.blit(t2, (mx - t2.get_width() // 2, 248))
     
     # 分隔线与说明：全竖排下留足间距
     line_y = 318
-    pygame.draw.line(surface, (50, 60, 70), (mx - 200, line_y), (mx + 200, line_y), 1)
-    hint = label_font.render("新游戏覆盖存档 · 继续游戏读取本地存档", True, (120, 130, 140))
+    pygame.draw.line(surface, TERMINAL_LINE, (mx - 200, line_y), (mx + 200, line_y), 1)
+    hint = label_font.render("新游戏覆盖存档 · 继续游戏读取本地存档", True, (120, 180, 130))
     surface.blit(hint, (mx - hint.get_width() // 2, line_y + 14))
 
     btn_new_game.draw(surface)
@@ -4764,6 +4839,9 @@ def main():
         update_achievement_notification(pygame.time.get_ticks())
         if g_achievement_notif_state:
             draw_achievement_notification(screen, font, label_font)
+
+        if ENABLE_PIPBOY_THEME and ENABLE_CRT:
+            draw_crt_overlay(screen)
 
         pygame.display.flip()
         # 累计游戏时长（成就统计）
