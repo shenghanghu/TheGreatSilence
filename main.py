@@ -1202,12 +1202,19 @@ def draw_intro_screen(surface, text, color, alpha):
 
 def draw_settings_screen(surface, btn_back, slider_vol):
     surface.fill(BG_COLOR)
-    
+    pygame.draw.rect(surface, (10, 20, 12), (0, 0, WINDOW_WIDTH, 86))
+    tab = label_font.render("STAT   INV   DATA   MAP   RADIO", True, TERMINAL_GLOW)
+    surface.blit(tab, (WINDOW_WIDTH // 2 - tab.get_width() // 2, 14))
+    pygame.draw.line(surface, TERMINAL_LINE, (120, 52), (WINDOW_WIDTH - 120, 52), 1)
+
     # Title
     t_surf = header_font.render("设置", True, ACCENT_COLOR)
     surface.blit(t_surf, (WINDOW_WIDTH // 2 - t_surf.get_width() // 2, 100))
     
     # Volume Control Area
+    panel_rect = pygame.Rect(WINDOW_WIDTH // 2 - 280, 250, 560, 190)
+    pygame.draw.rect(surface, (12, 26, 14), panel_rect, border_radius=2)
+    pygame.draw.rect(surface, TERMINAL_LINE, panel_rect, 1, border_radius=2)
     label_vol = font.render(f"音乐音量: {int(slider_vol.val * 100)}%", True, TEXT_COLOR)
     surface.blit(label_vol, (WINDOW_WIDTH // 2 - 150, 300))
     
@@ -1233,7 +1240,7 @@ def draw_level_catalog(surface, level_mgr, stars_dict, btn_back):
     surface.fill(BG_COLOR)
     title = header_font.render("关卡目录", True, ACCENT_COLOR)
     surface.blit(title, (80, 25))
-    sub = label_font.render("点击已解锁关卡进入简报 · 进度已自动保存", True, (150, 150, 150))
+    sub = label_font.render("点击已解锁关卡进入简报 · 进度已自动保存", True, (120, 180, 130))
     surface.blit(sub, (80, 58))
     pygame.draw.line(surface, ACCENT_COLOR, (80, 85), (WINDOW_WIDTH - 80, 85), 2)
     g_level_catalog_rects = []
@@ -1252,21 +1259,21 @@ def draw_level_catalog(surface, level_mgr, stars_dict, btn_back):
         unlocked = idx <= level_mgr.current_level_idx
         if unlocked:
             g_level_catalog_rects.append((rect, idx))
-        color = (28, 35, 45)
+        color = (13, 28, 16)
         if not unlocked:
-            color = (22, 26, 32)
+            color = (10, 18, 12)
         if idx == level_mgr.current_level_idx:
-            pygame.draw.rect(surface, (40, 55, 75), rect, border_radius=8)
-            pygame.draw.rect(surface, ACCENT_COLOR, rect, 2, border_radius=8)
+            pygame.draw.rect(surface, (18, 42, 22), rect, border_radius=2)
+            pygame.draw.rect(surface, TERMINAL_GLOW, rect, 2, border_radius=2)
         else:
-            pygame.draw.rect(surface, color, rect, border_radius=8)
-            pygame.draw.rect(surface, (50, 60, 75), rect, 1, border_radius=8)
+            pygame.draw.rect(surface, color, rect, border_radius=2)
+            pygame.draw.rect(surface, TERMINAL_LINE, rect, 1, border_radius=2)
         title_text = lv.get("title", f"关卡 {lid}")
         star_count = stars_dict.get(lid, 0)
         star_str = "★" * star_count + "☆" * (3 - star_count)
-        text_color = (220, 220, 220) if unlocked else (100, 100, 110)
+        text_color = TEXT_COLOR if unlocked else (85, 120, 90)
         surf_title = label_font.render(f"{lid}. {title_text}", True, text_color)
-        surf_star = label_font.render(star_str, True, (255, 200, 50)) if unlocked else label_font.render("—", True, (80, 80, 90))
+        surf_star = label_font.render(star_str, True, (200, 255, 170)) if unlocked else label_font.render("—", True, (70, 95, 74))
         surface.blit(surf_title, (x + 12, cy + 10))
         surface.blit(surf_star, (x + 12, cy + 36))
         if not unlocked:
@@ -1280,7 +1287,7 @@ def draw_briefing_screen(surface, level, btn):
     
     # Title
     phase = font.render(level['phase'], True, ACCENT_COLOR)
-    title = header_font.render(level['title'], True, (255, 255, 255))
+    title = header_font.render(level['title'], True, TEXT_COLOR)
     surface.blit(phase, (100, 100))
     surface.blit(title, (100, 130))
     pygame.draw.line(surface, ACCENT_COLOR, (100, 170), (1100, 170), 2)
@@ -1292,14 +1299,14 @@ def draw_briefing_screen(surface, level, btn):
             
     # Mission Info
     y += 40
-    pygame.draw.rect(surface, (20, 24, 30), (100, y, 1000, 200), border_radius=10)
-    pygame.draw.rect(surface, (60, 60, 70), (100, y, 1000, 200), 1, border_radius=10)
+    pygame.draw.rect(surface, (10, 24, 13), (100, y, 1000, 200), border_radius=2)
+    pygame.draw.rect(surface, TERMINAL_LINE, (100, y, 1000, 200), 1, border_radius=2)
     
     y_inner = y + 20
     if 'mission_info' in level:
         # Separate lines that might have "目标" for coloring, or just wrap all
         for line in level['mission_info'].split('\n'):
-            col = (255, 200, 50) if "目标" in line else TEXT_COLOR
+            col = (210, 255, 180) if "目标" in line else TEXT_COLOR
             y_inner = render_text_wrapped(surface, line, (130, y_inner), 940, font, col)
             y_inner += 5 # padding
             
@@ -1309,9 +1316,9 @@ def draw_briefing_screen(surface, level, btn):
     weather_probe = WeatherSystem()
     weather_probe.set_weather(weather_key)
     w_info = weather_probe.get_weather_info()
-    pygame.draw.rect(surface, (18, 26, 36), (100, y_weather, 1000, 120), border_radius=10)
-    pygame.draw.rect(surface, (70, 90, 120), (100, y_weather, 1000, 120), 1, border_radius=10)
-    surface.blit(font.render(f"天气预报: {w_info.name} ({weather_key})", True, (180, 220, 255)), (120, y_weather + 14))
+    pygame.draw.rect(surface, (10, 26, 12), (100, y_weather, 1000, 120), border_radius=2)
+    pygame.draw.rect(surface, TERMINAL_LINE, (100, y_weather, 1000, 120), 1, border_radius=2)
+    surface.blit(font.render(f"天气预报: {w_info.name} ({weather_key})", True, (185, 255, 195)), (120, y_weather + 14))
     effect_lines = [
         f"总体影响: {w_info.description}",
         f"SNR修正: {w_info.snr_penalty:+.1f} dB   激光附加: {w_info.laser_penalty:+.1f} dB   BER倍率: x{w_info.ber_multiplier:.2f}",
@@ -1333,7 +1340,7 @@ def draw_briefing_screen(surface, level, btn):
     y_reward = y_weather + 140
     if 'reward' in level:
         lbl = label_font.render("任务奖励:", True, SUCCESS_COLOR)
-        val = font.render(level['reward'], True, (255, 255, 255))
+        val = font.render(level['reward'], True, TEXT_COLOR)
         surface.blit(lbl, (100, y_reward))
         surface.blit(val, (100, y_reward + 25))
     # 已获星级 (阶段 2.2)
@@ -1341,8 +1348,8 @@ def draw_briefing_screen(surface, level, btn):
     key = int(lid) if isinstance(lid, str) and (lid or "").isdigit() else lid
     earned = g_level_stars.get(key, 0)
     star_y = y_reward + 55
-    surface.blit(label_font.render("已获星级:", True, (255, 200, 50)), (100, star_y))
-    GOLD, GRAY = (255, 200, 50), (80, 80, 80)
+    surface.blit(label_font.render("已获星级:", True, (200, 255, 170)), (100, star_y))
+    GOLD, GRAY = (200, 255, 170), (70, 90, 74)
     for i in range(3):
         x = 200 + i * 28
         if i < earned:
@@ -1366,7 +1373,7 @@ def draw_satellite_deployment_screen(
     btn_done,
 ):
     surface.fill(BG_COLOR)
-    pygame.draw.rect(surface, (16, 22, 32), (0, 0, WINDOW_WIDTH, 100))
+    pygame.draw.rect(surface, (10, 20, 12), (0, 0, WINDOW_WIDTH, 100))
     surface.blit(header_font.render("卫星部署阶段", True, ACCENT_COLOR), (40, 24))
     surface.blit(font.render(f"关卡: {level.get('title', '')}", True, TEXT_COLOR), (40, 60))
 
@@ -1374,21 +1381,21 @@ def draw_satellite_deployment_screen(
     px1, px2 = deployment.position_range["x"]
     py1, py2 = deployment.position_range["y"]
     area_rect = pygame.Rect(px1, py1, px2 - px1, py2 - py1)
-    pygame.draw.rect(surface, (20, 36, 52), area_rect)
-    pygame.draw.rect(surface, (70, 120, 170), area_rect, 2)
-    surface.blit(label_font.render("可部署区域（点击选点）", True, (180, 220, 255)), (area_rect.x + 10, area_rect.y + 10))
+    pygame.draw.rect(surface, (12, 28, 16), area_rect)
+    pygame.draw.rect(surface, TERMINAL_LINE, area_rect, 2)
+    surface.blit(label_font.render("可部署区域（点击选点）", True, TEXT_COLOR), (area_rect.x + 10, area_rect.y + 10))
 
     # Existing nodes
     for node in level.get("nodes", []):
-        color = (100, 255, 255) if node.get("type") == "src" else (255, 120, 120) if node.get("type") == "dest" else (220, 220, 120)
+        color = (130, 255, 150) if node.get("type") == "src" else (160, 240, 135) if node.get("type") == "dest" else (100, 180, 115)
         pygame.draw.circle(surface, color, (int(node["pos"][0]), int(node["pos"][1])), 7)
-        txt = label_font.render(node.get("name", ""), True, (210, 210, 210))
+        txt = label_font.render(node.get("name", ""), True, TEXT_COLOR)
         surface.blit(txt, (int(node["pos"][0]) + 10, int(node["pos"][1]) - 10))
 
     # Reference point
     ref = deployment.reference_pos
-    pygame.draw.circle(surface, (255, 210, 90), (int(ref[0]), int(ref[1])), 8)
-    surface.blit(label_font.render("参考点", True, (255, 210, 90)), (int(ref[0]) + 10, int(ref[1]) - 18))
+    pygame.draw.circle(surface, (200, 255, 170), (int(ref[0]), int(ref[1])), 8)
+    surface.blit(label_font.render("参考点", True, (200, 255, 170)), (int(ref[0]) + 10, int(ref[1]) - 18))
 
     # Deployed satellites
     for sat in deployment.deployed_satellites:
@@ -1404,19 +1411,19 @@ def draw_satellite_deployment_screen(
 
     # Right panel
     panel_x = MAP_WIDTH + 10
-    pygame.draw.rect(surface, (20, 24, 30), (MAP_WIDTH, 0, HUD_WIDTH, WINDOW_HEIGHT))
+    pygame.draw.rect(surface, (8, 20, 10), (MAP_WIDTH, 0, HUD_WIDTH, WINDOW_HEIGHT))
     pygame.draw.rect(surface, ACCENT_COLOR, (MAP_WIDTH, 0, HUD_WIDTH, WINDOW_HEIGHT), 2)
-    surface.blit(font.render(f"预算: {fmt_num(deployment.budget)}/{fmt_num(deployment.initial_budget)}", True, (255, 215, 120)), (panel_x, 30))
-    surface.blit(label_font.render(f"已部署: {len(deployment.deployed_satellites)} / {deployment.max_satellites}", True, (180, 210, 240)), (panel_x, 60))
+    surface.blit(font.render(f"预算: {fmt_num(deployment.budget)}/{fmt_num(deployment.initial_budget)}", True, (210, 255, 180)), (panel_x, 30))
+    surface.blit(label_font.render(f"已部署: {len(deployment.deployed_satellites)} / {deployment.max_satellites}", True, TEXT_COLOR), (panel_x, 60))
 
     y = 290
     selected_sat = SATELLITE_TYPES.get(selected_sat_type, SATELLITE_TYPES["basic"])
     info_rect = pygame.Rect(panel_x, y, HUD_WIDTH - 24, 110)
-    pygame.draw.rect(surface, (34, 40, 48), info_rect, border_radius=6)
-    pygame.draw.rect(surface, (110, 130, 160), info_rect, 1, border_radius=6)
-    surface.blit(label_font.render(f"当前类型: {selected_sat['name']} ({selected_sat_type})", True, (220, 235, 255)), (info_rect.x + 10, info_rect.y + 10))
-    surface.blit(label_font.render(f"基础成本: {fmt_num(selected_sat['base_cost'])}  增益: {selected_sat['antenna_gain']}dBi", True, (180, 210, 235)), (info_rect.x + 10, info_rect.y + 36))
-    surface.blit(label_font.render(f"说明: {selected_sat['description']}", True, (170, 190, 210)), (info_rect.x + 10, info_rect.y + 62))
+    pygame.draw.rect(surface, (12, 26, 14), info_rect, border_radius=2)
+    pygame.draw.rect(surface, TERMINAL_LINE, info_rect, 1, border_radius=2)
+    surface.blit(label_font.render(f"当前类型: {selected_sat['name']} ({selected_sat_type})", True, TEXT_COLOR), (info_rect.x + 10, info_rect.y + 10))
+    surface.blit(label_font.render(f"基础成本: {fmt_num(selected_sat['base_cost'])}  增益: {selected_sat['antenna_gain']}dBi", True, (145, 220, 158)), (info_rect.x + 10, info_rect.y + 36))
+    surface.blit(label_font.render(f"说明: {selected_sat['description']}", True, (120, 185, 130)), (info_rect.x + 10, info_rect.y + 62))
 
     if selected_pos is not None:
         surface.blit(label_font.render(f"选中坐标: ({int(selected_pos[0])}, {int(selected_pos[1])})", True, (220, 220, 220)), (panel_x, y + 124))
@@ -4296,22 +4303,22 @@ def main():
                     # Add random radar ping to nodes
                     vfx_radar.add(node['pos'][0], node['pos'][1])
 
-                    color = (100, 255, 100) # Default
-                    if node['type'] == 'src': color = (100, 255, 255)
-                    elif node['type'] == 'dest': color = (255, 100, 100)
-                    elif node['type'] == 'relay': color = (200, 200, 100)
+                    color = (115, 230, 130) # Default
+                    if node['type'] == 'src': color = (135, 255, 150)
+                    elif node['type'] == 'dest': color = (160, 240, 135)
+                    elif node['type'] == 'relay': color = (95, 185, 108)
                     
                     if i in path_indices:
-                        pygame.draw.circle(screen, (255, 255, 255), node['pos'], 8) # Selected highlight
+                        pygame.draw.circle(screen, TERMINAL_GLOW, node['pos'], 8) # Selected highlight
                         # Add constant ping for selected nodes
                         if np.random.random() < 0.1: vfx_radar.add(node['pos'][0], node['pos'][1])
                     
                     pygame.draw.circle(screen, color, node['pos'], 6)
                     
                     # Label
-                    text = font.render(node['name'], True, (200, 200, 200))
+                    text = font.render(node['name'], True, TEXT_COLOR)
                     rect = text.get_rect(center=(node['pos'][0], node['pos'][1] + 20))
-                    pygame.draw.rect(screen, (0,0,0,150), rect.inflate(10,4), border_radius=3)
+                    pygame.draw.rect(screen, (6, 14, 8, 160), rect.inflate(10, 4), border_radius=2)
                     screen.blit(text, rect)
             else:
                 # Legacy Drawing
@@ -4328,7 +4335,7 @@ def main():
             # 背景噪声视觉效果：除第一关外全部开启，或根据是否有节点判定
             if level.get('id') != 1:
                 for _ in range(50):
-                     pygame.draw.circle(screen, (40,50,60), (np.random.randint(0,MAP_WIDTH), np.random.randint(105,800)), 1)
+                     pygame.draw.circle(screen, (26, 44, 30), (np.random.randint(0,MAP_WIDTH), np.random.randint(105,800)), 1)
 
             # Header：横线下移，关卡内容整体下移，顶栏加高留白
             header_h = 100
@@ -4349,20 +4356,20 @@ def main():
                     snr_display = f"Last Hop {sim_result['final_snr']:.1f}dB"
             else:
                 snr_display = "No noise" if level.get('id') == 1 else f"{level['snr_db']}dB"
-            screen.blit(font.render(f"目标 BER < {level['target_ber']}  |  SNR: {snr_display}", True, (150,150,150)), (left_x, line2_y))
+            screen.blit(font.render(f"目标 BER < {level['target_ber']}  |  SNR: {snr_display}", True, (120, 185, 130)), (left_x, line2_y))
             # 横线再下移，与文字、关卡内容留足间距
             sep_y = 82
-            pygame.draw.line(screen, (50, 55, 65), (0, sep_y), (MAP_WIDTH, sep_y), 1)
+            pygame.draw.line(screen, TERMINAL_LINE, (0, sep_y), (MAP_WIDTH, sep_y), 1)
             # 右：预算 + 天气 + 回滚按钮
             pwr_x = MAP_WIDTH - 220
             budget_surf = label_font.render(
                 f"预算: {fmt_num(budget_manager.current_budget)}  已消耗: {fmt_num(budget_manager.spent_this_level)}",
                 True,
-                (255, 215, 120),
+                (215, 255, 180),
             )
             screen.blit(budget_surf, (pwr_x - 120, line1_y + 8))
             weather_name = weather_system.get_weather_info().name
-            weather_surf = label_font.render(f"天气: {weather_name}", True, (170, 210, 255))
+            weather_surf = label_font.render(f"天气: {weather_name}", True, (160, 230, 170))
             screen.blit(weather_surf, (pwr_x - 120, line2_y + 12))
             if level.get('id') != 'HIDDEN_SAT_ARRAY':
                 btn_restart_level.draw(screen)
@@ -4370,24 +4377,24 @@ def main():
             # Weather panel (from implementation checklist): visible summary on map side.
             weather_info = weather_system.get_weather_info()
             panel_rect = pygame.Rect(20, 92, 320, 84)
-            pygame.draw.rect(screen, (22, 28, 36), panel_rect, border_radius=8)
-            pygame.draw.rect(screen, (70, 100, 130), panel_rect, 1, border_radius=8)
-            screen.blit(label_font.render(f"天气: {weather_info.name}", True, (180, 220, 255)), (panel_rect.x + 12, panel_rect.y + 8))
-            screen.blit(label_font.render(weather_info.description, True, (195, 205, 215)), (panel_rect.x + 12, panel_rect.y + 30))
+            pygame.draw.rect(screen, (10, 24, 13), panel_rect, border_radius=2)
+            pygame.draw.rect(screen, TERMINAL_LINE, panel_rect, 1, border_radius=2)
+            screen.blit(label_font.render(f"天气: {weather_info.name}", True, (185, 255, 190)), (panel_rect.x + 12, panel_rect.y + 8))
+            screen.blit(label_font.render(weather_info.description, True, (140, 200, 148)), (panel_rect.x + 12, panel_rect.y + 30))
             screen.blit(
-                label_font.render(f"SNR {weather_info.snr_penalty:+.1f} dB | BER x{weather_info.ber_multiplier:.2f}", True, (150, 180, 210)),
+                label_font.render(f"SNR {weather_info.snr_penalty:+.1f} dB | BER x{weather_info.ber_multiplier:.2f}", True, (130, 190, 138)),
                 (panel_rect.x + 12, panel_rect.y + 52),
             )
 
             # Hidden Level Special UI: Attempts
             if level.get('id') == 'HIDDEN_SAT_ARRAY':
                 attempts_left = MAX_HIDDEN_ATTEMPTS - hidden_attempts
-                att_color = (255, 200, 50) if attempts_left > 0 else (255, 50, 50)
+                att_color = (220, 255, 170) if attempts_left > 0 else ERROR_COLOR
                 screen.blit(font.render(f"Remaining Pings: {attempts_left}", True, att_color), (WINDOW_WIDTH - 220, 60))
             
             # HUD Background (Fills the right side)
             bx = MAP_WIDTH
-            pygame.draw.rect(screen, (25, 25, 30), (bx, 0, HUD_WIDTH, WINDOW_HEIGHT))
+            pygame.draw.rect(screen, (8, 20, 10), (bx, 0, HUD_WIDTH, WINDOW_HEIGHT))
             pygame.draw.line(screen, ACCENT_COLOR, (bx, 0), (bx, WINDOW_HEIGHT), 2)
             hud_content_clip = pygame.Rect(bx, 92, HUD_WIDTH, WINDOW_HEIGHT - 92)
             screen.set_clip(hud_content_clip)
@@ -4398,15 +4405,15 @@ def main():
             
             cy_box = cy_base + 20 # 105
             c_box_h = 160 # Reduced slightly
-            pygame.draw.rect(screen, (0, 0, 0), (bx + 10, cy_box, HUD_WIDTH - 20, c_box_h), border_radius=5)
-            pygame.draw.rect(screen, (60, 60, 70), (bx + 10, cy_box, HUD_WIDTH - 20, c_box_h), 1, border_radius=5)
+            pygame.draw.rect(screen, (5, 10, 5), (bx + 10, cy_box, HUD_WIDTH - 20, c_box_h), border_radius=2)
+            pygame.draw.rect(screen, TERMINAL_LINE, (bx + 10, cy_box, HUD_WIDTH - 20, c_box_h), 1, border_radius=2)
             
             if sim_result:
                 draw_constellation(screen, sim_result['rx_syms'], bx + HUD_WIDTH//2, cy_box + c_box_h//2, 60)
             else:
                 cx_c, cy_c = bx + HUD_WIDTH//2, cy_box + c_box_h//2
-                pygame.draw.line(screen,(40,40,40),(cx_c - 100, cy_c),(cx_c + 100, cy_c))
-                pygame.draw.line(screen,(40,40,40),(cx_c, cy_c - 60),(cx_c, cy_c + 60))
+                pygame.draw.line(screen, (45, 90, 50), (cx_c - 100, cy_c), (cx_c + 100, cy_c))
+                pygame.draw.line(screen, (45, 90, 50), (cx_c, cy_c - 60), (cx_c, cy_c + 60))
                 
             # --- 2. System Configuration ---
             y = cy_box + c_box_h + 20 # ~ 285
@@ -4414,7 +4421,7 @@ def main():
             y += 25
             
             # Mod Selection
-            screen.blit(label_font.render("MODULATION", True, (150,150,150)), (bx+10, y+8))
+            screen.blit(label_font.render("MODULATION", True, (120, 185, 130)), (bx+10, y+8))
             mods = level.get('available_mods', ["BPSK"])
             btn_w = (HUD_WIDTH - 80) // len(mods) if mods else HUD_WIDTH - 40
             for i,mod in enumerate(mods):
@@ -4424,16 +4431,16 @@ def main():
                 # --- TUTORIAL CAPTURE: BPSK Button ---
                 if mod == "BPSK": rect_mod_bpsk = r
                 
-                col = (0, 120, 200) if mod == current_mod else (50,50,60)
-                pygame.draw.rect(screen, col, r, border_radius=4)
-                if mod == current_mod: pygame.draw.rect(screen, (255,255,255), r, 1, border_radius=4)
+                col = (28, 85, 35) if mod == current_mod else (22, 34, 24)
+                pygame.draw.rect(screen, col, r, border_radius=2)
+                if mod == current_mod: pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
                 
-                txt = label_font.render(mod, True, (255,255,255))
+                txt = label_font.render(mod, True, TEXT_COLOR)
                 screen.blit(txt, (r.centerx-txt.get_width()//2, r.centery-txt.get_height()//2))
             
             # Coding Selection
             y += 35
-            screen.blit(label_font.render("CODE", True, (150,150,150)), (bx+10, y+8))
+            screen.blit(label_font.render("CODE", True, (120, 185, 130)), (bx+10, y+8))
             codes = level.get('available_codes', ["None"])
             for i,code in enumerate(codes):
                 # Spread out in grid if many
@@ -4451,11 +4458,11 @@ def main():
                 if code == "Repetition(3,1)": rect_code_rep = r
 
                 ui_code_rects.append((r,code))
-                col = (180,80,30) if code == current_code else (50,50,60)
-                pygame.draw.rect(screen, col, r, border_radius=4)
-                if code == current_code: pygame.draw.rect(screen, (255,255,255), r, 1, border_radius=4)
+                col = (28, 85, 35) if code == current_code else (22, 34, 24)
+                pygame.draw.rect(screen, col, r, border_radius=2)
+                if code == current_code: pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
                 
-                txt = label_font.render(code, True, (255,255,255))
+                txt = label_font.render(code, True, TEXT_COLOR)
                 screen.blit(txt, (r.centerx-txt.get_width()//2, r.centery-txt.get_height()//2))
 
             # Adjust y based on how many rows code buttons took
@@ -4463,7 +4470,7 @@ def main():
             y += num_rows_code * 35 + 10
 
             # Protocol Selection (Phase 2.1)
-            screen.blit(label_font.render("PROTOCOL", True, (150,150,150)), (bx+10, y+8))
+            screen.blit(label_font.render("PROTOCOL", True, (120, 185, 130)), (bx+10, y+8))
             level_id = level.get("id")
             safe_level_id = level_id if isinstance(level_id, int) else 1
             available_protocols = protocol_system.get_available_protocols(safe_level_id)
@@ -4477,11 +4484,11 @@ def main():
                 r = pygame.Rect(bx + 60 + col_idx * (proto_w + 5), py, proto_w, 30)
                 ui_protocol_rects.append((r, proto_id))
                 selected = proto_id == selected_protocol
-                col = (20, 110, 120) if selected else (50, 50, 60)
-                pygame.draw.rect(screen, col, r, border_radius=4)
+                col = (28, 85, 35) if selected else (22, 34, 24)
+                pygame.draw.rect(screen, col, r, border_radius=2)
                 if selected:
-                    pygame.draw.rect(screen, (255, 255, 255), r, 1, border_radius=4)
-                ptxt = label_font.render(f"{proto_info.name} ({fmt_num(proto_info.cost)})", True, (235, 235, 235))
+                    pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
+                ptxt = label_font.render(f"{proto_info.name} ({fmt_num(proto_info.cost)})", True, TEXT_COLOR)
                 screen.blit(ptxt, (r.centerx - ptxt.get_width() // 2, r.centery - ptxt.get_height() // 2))
             proto_rows = (len(proto_items) + proto_cols - 1) // proto_cols
             y += proto_rows * 35 + 8
@@ -4489,22 +4496,22 @@ def main():
             # Weather / Power controls (Phase 1.2 + 2.3.1)
             w_info = weather_system.get_weather_info()
             weather_cycle_rect = pygame.Rect(bx + 10, y, HUD_WIDTH - 20, 28)
-            pygame.draw.rect(screen, (55, 65, 80), weather_cycle_rect, border_radius=4)
-            pygame.draw.rect(screen, (110, 130, 160), weather_cycle_rect, 1, border_radius=4)
-            wtxt = label_font.render(f"天气: {w_info.name}  (本关随机固定)", True, (215, 230, 255))
+            pygame.draw.rect(screen, (22, 34, 24), weather_cycle_rect, border_radius=2)
+            pygame.draw.rect(screen, TERMINAL_LINE, weather_cycle_rect, 1, border_radius=2)
+            wtxt = label_font.render(f"天气: {w_info.name}  (本关随机固定)", True, TEXT_COLOR)
             screen.blit(wtxt, (weather_cycle_rect.x + 10, weather_cycle_rect.centery - wtxt.get_height() // 2))
             y += 34
 
             power_slider.y = y
             slider_rect = power_slider.rect
-            pygame.draw.rect(screen, (55, 55, 60), slider_rect, border_radius=4)
+            pygame.draw.rect(screen, (22, 34, 24), slider_rect, border_radius=2)
             ratio = power_slider.get_ratio()
             handle_x = slider_rect.x + int(ratio * slider_rect.width)
-            pygame.draw.circle(screen, (0, 180, 255), (handle_x, slider_rect.centery), 10)
+            pygame.draw.circle(screen, TERMINAL_GLOW, (handle_x, slider_rect.centery), 10)
             ptxt = label_font.render(
                 f"发射功率: {power_slider.current_power:.1f} dBm  成本: {fmt_num(calculate_transmission_cost(power_slider.current_power, selected_protocol))}",
                 True,
-                (190, 220, 250),
+                (145, 220, 158),
             )
             screen.blit(ptxt, (bx + 10, y + 30))
             y += 56
@@ -4512,12 +4519,12 @@ def main():
             # System Status
             screen.blit(label_font.render("系统状态 (System Status)", True, ACCENT_COLOR), (bx+10, y))
             y += 25
-            screen.blit(font.render(f"可用预算: {fmt_num(budget_manager.current_budget)}", True, (255, 200, 50)), (bx+20, y))
+            screen.blit(font.render(f"可用预算: {fmt_num(budget_manager.current_budget)}", True, (210, 255, 180)), (bx+20, y))
             y += 30
 
             # Decoder / Tech Row
             if current_code and current_code.startswith("Polar"):
-                screen.blit(label_font.render("DEC:", True, (150,150,150)), (bx+10, y+5))
+                screen.blit(label_font.render("DEC:", True, (120, 185, 130)), (bx+10, y+5))
                 methods = ["SC"]
                 lvl_id = level.get('id', 1)
                 if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str): methods.append("BP")
@@ -4526,10 +4533,10 @@ def main():
                 for j, method in enumerate(methods):
                     rect_d = pygame.Rect(bx + 60 + j*75, y, 70, 25)
                     ui_decoder_rects.append((rect_d, method))
-                    col_d = (40, 120, 80) if current_polar_method == method else (40, 40, 50)
-                    pygame.draw.rect(screen, col_d, rect_d, border_radius=4)
-                    if current_polar_method == method: pygame.draw.rect(screen, (255, 255, 255), rect_d, 1, border_radius=4)
-                    txt_d = label_font.render(method, True, (255,255,255))
+                    col_d = (28, 85, 35) if current_polar_method == method else (22, 34, 24)
+                    pygame.draw.rect(screen, col_d, rect_d, border_radius=2)
+                    if current_polar_method == method: pygame.draw.rect(screen, TERMINAL_GLOW, rect_d, 1, border_radius=2)
+                    txt_d = label_font.render(method, True, TEXT_COLOR)
                     screen.blit(txt_d, (rect_d.centerx - txt_d.get_width()//2, rect_d.centery - txt_d.get_height()//2))
                 y += 40
             
@@ -4540,12 +4547,12 @@ def main():
             if has_laser_tech:
                 r_tech = pygame.Rect(bx+10, y, HUD_WIDTH-20, 30)
                 ui_tech_rects.append((r_tech, "Laser"))
-                col_t = (180, 30, 30) if laser_module_active else (60, 60, 65)
-                pygame.draw.rect(screen, col_t, r_tech, border_radius=4)
-                if laser_module_active: pygame.draw.rect(screen, (255, 100, 100), r_tech, 1, border_radius=4)
+                col_t = (46, 40, 20) if laser_module_active else (22, 34, 24)
+                pygame.draw.rect(screen, col_t, r_tech, border_radius=2)
+                if laser_module_active: pygame.draw.rect(screen, (230, 190, 120), r_tech, 1, border_radius=2)
                 
                 status_str = "LASER MODULE: ACTIVE (+120预算)" if laser_module_active else "LASER MODULE: STANDBY"
-                t_surf = label_font.render(status_str, True, (255,255,255))
+                t_surf = label_font.render(status_str, True, TEXT_COLOR)
                 screen.blit(t_surf, (r_tech.centerx - t_surf.get_width()//2, r_tech.centery - t_surf.get_height()//2))
                 y += 40
 
@@ -4553,8 +4560,8 @@ def main():
 
             # --- 2.5 当前配置预览 (阶段 2.1) ---
             preview_h = 100
-            pygame.draw.rect(screen, (18, 22, 28), (bx+10, y, HUD_WIDTH-20, preview_h), border_radius=6)
-            pygame.draw.rect(screen, (50, 60, 75), (bx+10, y, HUD_WIDTH-20, preview_h), 1, border_radius=6)
+            pygame.draw.rect(screen, (12, 24, 14), (bx+10, y, HUD_WIDTH-20, preview_h), border_radius=2)
+            pygame.draw.rect(screen, TERMINAL_LINE, (bx+10, y, HUD_WIDTH-20, preview_h), 1, border_radius=2)
             screen.blit(label_font.render("当前配置预览", True, ACCENT_COLOR), (bx+18, y+6))
             snr_preview = level.get('snr_db', 5) + compute_power_snr_boost(power_slider.current_power)
             est_ber = estimate_ber(snr_preview, current_mod or "BPSK", current_code)
@@ -4564,13 +4571,13 @@ def main():
                 label_font.render(
                     f"调制: {current_mod or '—'}  编码: {current_code or '—'}  协议: {selected_protocol.upper()}",
                     True,
-                    (200,200,200),
+                    TEXT_COLOR,
                 ),
                 (bx+18, y+26),
             )
-            screen.blit(label_font.render(f"预计误码率: ~{est_ber:.4f}", True, (180,200,180)), (bx+18, y+46))
+            screen.blit(label_font.render(f"预计误码率: ~{est_ber:.4f}", True, (145, 220, 158)), (bx+18, y+46))
             star_str = "★" * star_num + "☆" * (5 - star_num)
-            screen.blit(label_font.render(f"建议: {star_str}", True, (255, 200, 50)), (bx+18, y+66))
+            screen.blit(label_font.render(f"建议: {star_str}", True, (200, 255, 170)), (bx+18, y+66))
             y += preview_h + 8
 
             # --- 3. Link Quality Monitor (Gauge) ---
@@ -4578,8 +4585,8 @@ def main():
             
             # --- TUTORIAL CAPTURE: Gauge ---
             rect_gauge = pygame.Rect(bx+10, y_gauge, HUD_WIDTH-20, 110)
-            pygame.draw.rect(screen, (20,20,25), (bx+10, y_gauge, HUD_WIDTH-20, 110), border_radius=6)
-            pygame.draw.rect(screen, (60,60,70), (bx+10, y_gauge, HUD_WIDTH-20, 110), 1, border_radius=6)
+            pygame.draw.rect(screen, (12, 24, 14), (bx+10, y_gauge, HUD_WIDTH-20, 110), border_radius=2)
+            pygame.draw.rect(screen, TERMINAL_LINE, (bx+10, y_gauge, HUD_WIDTH-20, 110), 1, border_radius=2)
             screen.blit(label_font.render("回声解析 (Echo Analysis)", True, ACCENT_COLOR), (bx+20, y_gauge+10))
             
             # Target BER Marker
@@ -4593,22 +4600,22 @@ def main():
 
             bar_w = HUD_WIDTH - 60
             bar_rect = pygame.Rect(bx+30, y_gauge+40, bar_w, 20)
-            pygame.draw.rect(screen, (40,40,45), bar_rect, border_radius=4)
+            pygame.draw.rect(screen, (24, 34, 26), bar_rect, border_radius=2)
             
             if sim_result:
                 w = int(bar_w * ber_to_width(curr_ber))
                 bar_col = SUCCESS_COLOR if curr_ber <= target_ber else ERROR_COLOR
-                pygame.draw.rect(screen, bar_col, (bx+30, y_gauge+40, w, 20), border_radius=4)
+                pygame.draw.rect(screen, bar_col, (bx+30, y_gauge+40, w, 20), border_radius=2)
             
             # Target tick
             target_x = bx+30 + int(bar_w * ber_to_width(target_ber))
-            pygame.draw.line(screen, (255, 255, 255), (target_x, y_gauge+35), (target_x, y_gauge+65), 2)
-            screen.blit(label_font.render("阈值", True, (255,255,255)), (target_x-15, y_gauge+67))
+            pygame.draw.line(screen, TERMINAL_GLOW, (target_x, y_gauge+35), (target_x, y_gauge+65), 2)
+            screen.blit(label_font.render("阈值", True, TERMINAL_GLOW), (target_x-15, y_gauge+67))
             
             # Numbers
             ber_str = f"{curr_ber:.4f}" if sim_result else "----"
-            screen.blit(font.render(f"当前: {ber_str}", True, (220,220,220)), (bx+30, y_gauge+85))
-            screen.blit(label_font.render(f"目标: <{target_ber}", True, (150,150,150)), (bx+HUD_WIDTH-120, y_gauge+88))
+            screen.blit(font.render(f"当前: {ber_str}", True, TEXT_COLOR), (bx+30, y_gauge+85))
+            screen.blit(label_font.render(f"目标: <{target_ber}", True, (120, 185, 130)), (bx+HUD_WIDTH-120, y_gauge+88))
             # 三星评价显示 (2.2)：过关时显示本次获得的星级
             if level_complete and sim_result and sim_result.get('success'):
                 stars = sim_result.get('stars', 0)
