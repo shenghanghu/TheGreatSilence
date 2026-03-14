@@ -900,29 +900,31 @@ def _build_crt_cache(size):
         pygame.draw.rect(_crt_vignette_surface, (0, 0, 0, alpha), rect, width=3)
 
 
-def draw_crt_overlay(surface):
+def draw_crt_overlay(surface, target_rect=None):
     """Draw a lightweight CRT overlay without touching game logic."""
     if not ENABLE_CRT:
         return
 
-    size = surface.get_size()
+    if target_rect is None:
+        target_rect = surface.get_rect()
+    size = (target_rect.width, target_rect.height)
     if _crt_scanline_surface is None or _crt_cached_size != size:
         _build_crt_cache(size)
 
     # Gentle green phosphor tint.
     tint = pygame.Surface(size, pygame.SRCALPHA)
     tint.fill((36, 255, 90, 12))
-    surface.blit(tint, (0, 0))
-    surface.blit(_crt_scanline_surface, (0, 0))
+    surface.blit(tint, target_rect.topleft)
+    surface.blit(_crt_scanline_surface, target_rect.topleft)
 
     # Subtle noise sparkles to avoid static look.
     for _ in range(150):
-        x = np.random.randint(0, size[0])
-        y = np.random.randint(0, size[1])
+        x = np.random.randint(target_rect.left, target_rect.right)
+        y = np.random.randint(target_rect.top, target_rect.bottom)
         value = np.random.randint(85, 132)
         surface.set_at((x, y), (value, min(255, value + 70), value))
 
-    surface.blit(_crt_vignette_surface, (0, 0))
+    surface.blit(_crt_vignette_surface, target_rect.topleft)
 
 
 # --- Visual Effects Classes ---
@@ -4415,148 +4417,135 @@ def main():
                 pygame.draw.line(screen, (45, 90, 50), (cx_c - 100, cy_c), (cx_c + 100, cy_c))
                 pygame.draw.line(screen, (45, 90, 50), (cx_c, cy_c - 60), (cx_c, cy_c + 60))
                 
-            # --- 2. System Configuration ---
-            y = cy_box + c_box_h + 20 # ~ 285
-            screen.blit(label_font.render("阵列配置 (Array Config)", True, ACCENT_COLOR), (bx+10, y))
-            y += 25
-            
-            # Mod Selection
-            screen.blit(label_font.render("MODULATION", True, (120, 185, 130)), (bx+10, y+8))
+            # --- 2. Machine Side Controls (Fallout-like physical console) ---
+            y = cy_box + c_box_h + 20
+            screen.blit(label_font.render("机器显示面板", True, ACCENT_COLOR), (bx + 10, y))
+            y += 24
+
+            side_rect = pygame.Rect(WINDOW_WIDTH - 174, 102, 164, WINDOW_HEIGHT - 120)
+            pygame.draw.rect(screen, (92, 74, 46), side_rect, border_radius=6)
+            pygame.draw.rect(screen, (54, 42, 24), side_rect, 2, border_radius=6)
+            inner = side_rect.inflate(-12, -12)
+            pygame.draw.rect(screen, (112, 90, 58), inner, border_radius=4)
+            pygame.draw.rect(screen, (64, 48, 28), inner, 1, border_radius=4)
+            screen.blit(label_font.render("CONTROL BANK", True, (40, 30, 18)), (inner.x + 14, inner.y + 8))
+
+            # Decorative screws / knobs to sell the "machine model" shape.
+            for sx, sy in [
+                (side_rect.x + 10, side_rect.y + 10),
+                (side_rect.right - 10, side_rect.y + 10),
+                (side_rect.x + 10, side_rect.bottom - 10),
+                (side_rect.right - 10, side_rect.bottom - 10),
+            ]:
+                pygame.draw.circle(screen, (70, 55, 35), (sx, sy), 5)
+                pygame.draw.circle(screen, (120, 96, 62), (sx, sy), 5, 1)
+            for ky in (inner.y + 120, inner.y + 220, inner.y + 320):
+                pygame.draw.circle(screen, (38, 30, 18), (inner.right + 8, ky), 14)
+                pygame.draw.circle(screen, (118, 95, 60), (inner.right + 8, ky), 14, 2)
+
+            ctrl_x = inner.x + 8
+            ctrl_w = inner.width - 16
+            ctrl_y = inner.y + 30
+            ctrl_h = 24
+
             mods = level.get('available_mods', ["BPSK"])
-            btn_w = (HUD_WIDTH - 80) // len(mods) if mods else HUD_WIDTH - 40
-            for i,mod in enumerate(mods):
-                r = pygame.Rect(bx+60+i*(btn_w+5), y, btn_w, 30)
-                ui_mod_rects.append((r,mod))
-                
-                # --- TUTORIAL CAPTURE: BPSK Button ---
-                if mod == "BPSK": rect_mod_bpsk = r
-                
-                col = (28, 85, 35) if mod == current_mod else (22, 34, 24)
+            screen.blit(label_font.render("MOD", True, (36, 28, 17)), (ctrl_x, ctrl_y))
+            ctrl_y += 18
+            for mod in mods:
+                r = pygame.Rect(ctrl_x, ctrl_y, ctrl_w, ctrl_h)
+                ui_mod_rects.append((r, mod))
+                if mod == "BPSK":
+                    rect_mod_bpsk = r
+                col = (84, 130, 88) if mod == current_mod else (56, 82, 58)
                 pygame.draw.rect(screen, col, r, border_radius=2)
-                if mod == current_mod: pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
-                
-                txt = label_font.render(mod, True, TEXT_COLOR)
-                screen.blit(txt, (r.centerx-txt.get_width()//2, r.centery-txt.get_height()//2))
-            
-            # Coding Selection
-            y += 35
-            screen.blit(label_font.render("CODE", True, (120, 185, 130)), (bx+10, y+8))
+                pygame.draw.rect(screen, (28, 46, 30), r, 1, border_radius=2)
+                txt = label_font.render(mod, True, (225, 245, 225))
+                screen.blit(txt, (r.centerx - txt.get_width() // 2, r.centery - txt.get_height() // 2))
+                ctrl_y += ctrl_h + 5
+
             codes = level.get('available_codes', ["None"])
-            for i,code in enumerate(codes):
-                # Spread out in grid if many
-                cols = 2 if len(codes) > 2 else len(codes)
-                row = i // cols
-                col_idx = i % cols
-                btn_w = (HUD_WIDTH - 80) // cols
-                
-                # If we have multiple lines, increment y for each new row
-                current_y = y + row * 35
-                
-                r = pygame.Rect(bx+60+col_idx*(btn_w+5), current_y, btn_w, 30)
-
-                # --- TUTORIAL CAPTURE: Code Button ---
-                if code == "Repetition(3,1)": rect_code_rep = r
-
-                ui_code_rects.append((r,code))
-                col = (28, 85, 35) if code == current_code else (22, 34, 24)
+            ctrl_y += 4
+            screen.blit(label_font.render("CODE", True, (36, 28, 17)), (ctrl_x, ctrl_y))
+            ctrl_y += 18
+            for code in codes[:4]:
+                r = pygame.Rect(ctrl_x, ctrl_y, ctrl_w, ctrl_h)
+                if code == "Repetition(3,1)":
+                    rect_code_rep = r
+                ui_code_rects.append((r, code))
+                col = (84, 130, 88) if code == current_code else (56, 82, 58)
                 pygame.draw.rect(screen, col, r, border_radius=2)
-                if code == current_code: pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
-                
-                txt = label_font.render(code, True, TEXT_COLOR)
-                screen.blit(txt, (r.centerx-txt.get_width()//2, r.centery-txt.get_height()//2))
+                pygame.draw.rect(screen, (28, 46, 30), r, 1, border_radius=2)
+                txt = label_font.render(code, True, (225, 245, 225))
+                screen.blit(txt, (r.centerx - txt.get_width() // 2, r.centery - txt.get_height() // 2))
+                ctrl_y += ctrl_h + 5
 
-            # Adjust y based on how many rows code buttons took
-            num_rows_code = (len(codes) + 1) // 2 if len(codes) > 0 else 1
-            y += num_rows_code * 35 + 10
-
-            # Protocol Selection (Phase 2.1)
-            screen.blit(label_font.render("PROTOCOL", True, (120, 185, 130)), (bx+10, y+8))
             level_id = level.get("id")
             safe_level_id = level_id if isinstance(level_id, int) else 1
             available_protocols = protocol_system.get_available_protocols(safe_level_id)
             proto_items = list(available_protocols.items())
-            proto_cols = min(2, max(1, len(proto_items)))
-            proto_w = (HUD_WIDTH - 80) // proto_cols
-            for i, (proto_id, proto_info) in enumerate(proto_items):
-                row = i // proto_cols
-                col_idx = i % proto_cols
-                py = y + row * 35
-                r = pygame.Rect(bx + 60 + col_idx * (proto_w + 5), py, proto_w, 30)
+            ctrl_y += 4
+            screen.blit(label_font.render("PROTO", True, (36, 28, 17)), (ctrl_x, ctrl_y))
+            ctrl_y += 18
+            for proto_id, proto_info in proto_items[:3]:
+                r = pygame.Rect(ctrl_x, ctrl_y, ctrl_w, ctrl_h)
                 ui_protocol_rects.append((r, proto_id))
                 selected = proto_id == selected_protocol
-                col = (28, 85, 35) if selected else (22, 34, 24)
+                col = (84, 130, 88) if selected else (56, 82, 58)
                 pygame.draw.rect(screen, col, r, border_radius=2)
-                if selected:
-                    pygame.draw.rect(screen, TERMINAL_GLOW, r, 1, border_radius=2)
-                ptxt = label_font.render(f"{proto_info.name} ({fmt_num(proto_info.cost)})", True, TEXT_COLOR)
-                screen.blit(ptxt, (r.centerx - ptxt.get_width() // 2, r.centery - ptxt.get_height() // 2))
-            proto_rows = (len(proto_items) + proto_cols - 1) // proto_cols
-            y += proto_rows * 35 + 8
+                pygame.draw.rect(screen, (28, 46, 30), r, 1, border_radius=2)
+                txt = label_font.render(proto_info.name.upper(), True, (225, 245, 225))
+                screen.blit(txt, (r.centerx - txt.get_width() // 2, r.centery - txt.get_height() // 2))
+                ctrl_y += ctrl_h + 5
 
-            # Weather / Power controls (Phase 1.2 + 2.3.1)
             w_info = weather_system.get_weather_info()
-            weather_cycle_rect = pygame.Rect(bx + 10, y, HUD_WIDTH - 20, 28)
-            pygame.draw.rect(screen, (22, 34, 24), weather_cycle_rect, border_radius=2)
-            pygame.draw.rect(screen, TERMINAL_LINE, weather_cycle_rect, 1, border_radius=2)
-            wtxt = label_font.render(f"天气: {w_info.name}  (本关随机固定)", True, TEXT_COLOR)
-            screen.blit(wtxt, (weather_cycle_rect.x + 10, weather_cycle_rect.centery - wtxt.get_height() // 2))
-            y += 34
+            weather_cycle_rect = pygame.Rect(ctrl_x, ctrl_y + 6, ctrl_w, ctrl_h)
+            pygame.draw.rect(screen, (68, 96, 64), weather_cycle_rect, border_radius=2)
+            pygame.draw.rect(screen, (28, 46, 30), weather_cycle_rect, 1, border_radius=2)
+            wtxt = label_font.render(f"WTHR {w_info.name}", True, (235, 246, 230))
+            screen.blit(wtxt, (weather_cycle_rect.centerx - wtxt.get_width() // 2, weather_cycle_rect.centery - wtxt.get_height() // 2))
+            ctrl_y += ctrl_h + 14
 
-            power_slider.y = y
+            power_slider.x = ctrl_x
+            power_slider.y = ctrl_y
+            power_slider.width = ctrl_w
             slider_rect = power_slider.rect
-            pygame.draw.rect(screen, (22, 34, 24), slider_rect, border_radius=2)
+            pygame.draw.rect(screen, (56, 82, 58), slider_rect, border_radius=2)
+            pygame.draw.rect(screen, (28, 46, 30), slider_rect, 1, border_radius=2)
             ratio = power_slider.get_ratio()
             handle_x = slider_rect.x + int(ratio * slider_rect.width)
-            pygame.draw.circle(screen, TERMINAL_GLOW, (handle_x, slider_rect.centery), 10)
-            ptxt = label_font.render(
-                f"发射功率: {power_slider.current_power:.1f} dBm  成本: {fmt_num(calculate_transmission_cost(power_slider.current_power, selected_protocol))}",
-                True,
-                (145, 220, 158),
-            )
-            screen.blit(ptxt, (bx + 10, y + 30))
-            y += 56
+            pygame.draw.circle(screen, (220, 190, 120), (handle_x, slider_rect.centery), 8)
+            ctrl_y += slider_rect.height + 6
+            ptxt = label_font.render(f"PWR {power_slider.current_power:.1f} dBm", True, (35, 30, 18))
+            screen.blit(ptxt, (ctrl_x, ctrl_y))
+            ctrl_y += 18
 
-            # System Status
-            screen.blit(label_font.render("系统状态 (System Status)", True, ACCENT_COLOR), (bx+10, y))
-            y += 25
-            screen.blit(font.render(f"可用预算: {fmt_num(budget_manager.current_budget)}", True, (210, 255, 180)), (bx+20, y))
-            y += 30
-
-            # Decoder / Tech Row
             if current_code and current_code.startswith("Polar"):
-                screen.blit(label_font.render("DEC:", True, (120, 185, 130)), (bx+10, y+5))
                 methods = ["SC"]
                 lvl_id = level.get('id', 1)
-                if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str): methods.append("BP")
-                if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str): methods.append("SCL")
-                
-                for j, method in enumerate(methods):
-                    rect_d = pygame.Rect(bx + 60 + j*75, y, 70, 25)
+                if (isinstance(lvl_id, int) and lvl_id >= 7) or isinstance(lvl_id, str):
+                    methods.extend(["BP", "SCL"])
+                for method in methods:
+                    rect_d = pygame.Rect(ctrl_x, ctrl_y, ctrl_w, ctrl_h)
                     ui_decoder_rects.append((rect_d, method))
-                    col_d = (28, 85, 35) if current_polar_method == method else (22, 34, 24)
+                    col_d = (84, 130, 88) if current_polar_method == method else (56, 82, 58)
                     pygame.draw.rect(screen, col_d, rect_d, border_radius=2)
-                    if current_polar_method == method: pygame.draw.rect(screen, TERMINAL_GLOW, rect_d, 1, border_radius=2)
-                    txt_d = label_font.render(method, True, TEXT_COLOR)
-                    screen.blit(txt_d, (rect_d.centerx - txt_d.get_width()//2, rect_d.centery - txt_d.get_height()//2))
-                y += 40
-            
-            # Laser Tech (Unlock Check: Level >= 6)
+                    pygame.draw.rect(screen, (28, 46, 30), rect_d, 1, border_radius=2)
+                    txt_d = label_font.render(f"DEC {method}", True, (225, 245, 225))
+                    screen.blit(txt_d, (rect_d.centerx - txt_d.get_width() // 2, rect_d.centery - txt_d.get_height() // 2))
+                    ctrl_y += ctrl_h + 4
+
             if isinstance(level.get('id', 0), int) and level.get('id', 0) >= 7:
                 has_laser_tech = True
-            
             if has_laser_tech:
-                r_tech = pygame.Rect(bx+10, y, HUD_WIDTH-20, 30)
+                r_tech = pygame.Rect(ctrl_x, ctrl_y + 4, ctrl_w, ctrl_h + 2)
                 ui_tech_rects.append((r_tech, "Laser"))
-                col_t = (46, 40, 20) if laser_module_active else (22, 34, 24)
+                col_t = (130, 100, 62) if laser_module_active else (74, 72, 60)
                 pygame.draw.rect(screen, col_t, r_tech, border_radius=2)
-                if laser_module_active: pygame.draw.rect(screen, (230, 190, 120), r_tech, 1, border_radius=2)
-                
-                status_str = "LASER MODULE: ACTIVE (+120预算)" if laser_module_active else "LASER MODULE: STANDBY"
-                t_surf = label_font.render(status_str, True, TEXT_COLOR)
-                screen.blit(t_surf, (r_tech.centerx - t_surf.get_width()//2, r_tech.centery - t_surf.get_height()//2))
-                y += 40
+                pygame.draw.rect(screen, (42, 36, 24), r_tech, 1, border_radius=2)
+                t_surf = label_font.render("LASER MODULE", True, (20, 20, 14))
+                screen.blit(t_surf, (r_tech.centerx - t_surf.get_width() // 2, r_tech.centery - t_surf.get_height() // 2))
 
-            y += 10 # Spacer
+            y += 6  # Spacer
 
             # --- 2.5 当前配置预览 (阶段 2.1) ---
             preview_h = 100
@@ -4848,7 +4837,10 @@ def main():
             draw_achievement_notification(screen, font, label_font)
 
         if ENABLE_PIPBOY_THEME and ENABLE_CRT:
-            draw_crt_overlay(screen)
+            if current_state == STATE_PLAYING:
+                draw_crt_overlay(screen, pygame.Rect(0, 0, MAP_WIDTH, WINDOW_HEIGHT))
+            else:
+                draw_crt_overlay(screen)
 
         pygame.display.flip()
         # 累计游戏时长（成就统计）
