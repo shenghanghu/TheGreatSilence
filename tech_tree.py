@@ -36,7 +36,7 @@ TECH_TREE_STRUCT = [
 
 
 def get_unlocked_techs(level_mgr, current_level_idx: int) -> set:
-    """根据当前关卡进度返回已解锁技术 key 集合。"""
+    """根据当前关卡进度返回已解锁技术 key 集合。关卡中编码可能为 Polar(N,K)，技能树节点 key 为 Polar，需归一化。"""
     unlocked = set()
     for i in range(min(current_level_idx + 1, len(level_mgr.levels))):
         lv = level_mgr.levels[i]
@@ -44,6 +44,9 @@ def get_unlocked_techs(level_mgr, current_level_idx: int) -> set:
             unlocked.add(m)
         for c in lv.get("available_codes", ["None"]):
             unlocked.add(c)
+            # 技能树节点 key 为 "Polar"，关卡里是 "Polar(256,128)" 等，需视为已解锁 Polar
+            if c and c.startswith("Polar"):
+                unlocked.add("Polar")
     return unlocked
 
 

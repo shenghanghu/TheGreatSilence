@@ -3718,13 +3718,8 @@ def main():
                 anim_progress = 1.0
                 is_animating = False
                 finish_sim()
-        if current_state == STATE_PLAYING and causal_animation:
-            if causal_animation.is_playing():
-                causal_animation.update()
-            if causal_animation.is_finished() and causal_pending_send:
-                causal_pending_send = False
-                causal_animation = None
-                cb_run_sim(force_send=True)
+        if current_state == STATE_PLAYING and causal_animation and causal_animation.is_playing():
+            causal_animation.update()
 
         # Events
         events = pygame.event.get()
@@ -3868,8 +3863,15 @@ def main():
                             command_mode = True
                             command_buffer = ""
                             continue
-                if causal_animation and causal_animation.is_playing():
-                    continue
+                if causal_animation and causal_pending_send:
+                    if causal_animation.is_playing():
+                        continue
+                    if causal_animation.is_finished():
+                        if e.type == pygame.MOUSEBUTTONDOWN:
+                            causal_pending_send = False
+                            causal_animation = None
+                            cb_run_sim(force_send=True)
+                        continue
                 # DEBUG CHEAT: F6 跳关
                 if e.type == pygame.KEYDOWN and e.key == pygame.K_F6 and not command_mode:
                     for idx, lvl in enumerate(level_mgr.levels):
@@ -4752,7 +4754,7 @@ def main():
                 pygame.draw.rect(screen, (24, 28, 34), tip_rect.inflate(24, 10), border_radius=6)
                 pygame.draw.rect(screen, (100, 120, 150), tip_rect.inflate(24, 10), 1, border_radius=6)
                 screen.blit(tip, tip_rect)
-            if causal_animation and causal_animation.is_playing():
+            if causal_animation and causal_pending_send:
                 causal_animation.draw(screen, font, label_font, header_font)
             hud_content_bottom = y_diag + log_box_h + hud_scroll_y
             hud_scroll_max = max(0, int(hud_content_bottom - (WINDOW_HEIGHT - 120)))

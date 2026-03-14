@@ -138,6 +138,8 @@ def test_phase1_phase2_systems():
 
     bm = BudgetManager(initial_budget=300)
     cost = calculate_transmission_cost(40, "udp")
+    high_cost = calculate_transmission_cost(70, "udp")
+    assert high_cost > cost * 2
     ok, _ = bm.spend(cost, "test")
     assert ok and bm.current_budget == 300 - cost
     ok2, _ = bm.spend(9999, "overflow")

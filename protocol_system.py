@@ -18,10 +18,10 @@ class ProtocolInfo:
 class ProtocolSystem:
     def __init__(self) -> None:
         self.protocols: Dict[str, ProtocolInfo] = {
-            "udp": ProtocolInfo("UDP", 10, "快速但不可靠", 1.5, 1.2, 0.8, 1),
-            "tcp": ProtocolInfo("TCP", 20, "可靠但较慢", 0.7, 0.5, 1.3, 2),
-            "sctp": ProtocolInfo("SCTP", 30, "平衡性能", 1.2, 0.8, 1.1, 4),
-            "quic": ProtocolInfo("QUIC", 40, "现代高性能协议", 1.8, 0.9, 1.2, 8),
+            "udp": ProtocolInfo("UDP", 10, "快速但不可靠", 1.5, 1.28, 1.0, 1),
+            "tcp": ProtocolInfo("TCP", 20, "可靠但较慢", 0.7, 0.46, 1.0, 2),
+            "sctp": ProtocolInfo("SCTP", 30, "平衡性能", 1.2, 0.74, 1.0, 4),
+            "quic": ProtocolInfo("QUIC", 40, "现代高性能协议", 1.8, 0.66, 1.0, 8),
         }
 
     def get_protocol_info(self, protocol_id: str) -> ProtocolInfo:

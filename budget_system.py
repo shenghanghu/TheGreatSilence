@@ -31,6 +31,10 @@ def calculate_transmission_cost(power_dbm: float, protocol: str = "udp") -> int:
     base = COST_TABLE["transmission_base"]
     power_delta = max(0.0, float(power_dbm) - 30.0)
     power_cost = int(power_delta * COST_TABLE["power_multiplier"])
+    # Non-linear surcharge for very high power to discourage brute-force maxing.
+    if power_dbm > 50:
+        high = float(power_dbm) - 50.0
+        power_cost += int(high * high * 1.8)
     protocol_cost = COST_TABLE.get(f"protocol_{protocol}", 0)
     return base + power_cost + protocol_cost
 

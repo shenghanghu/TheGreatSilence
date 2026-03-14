@@ -465,6 +465,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_easter_egg,
+        "image": "隐藏成就/彩蛋发现者.png",
     },
     "shannon_tribute": {
         "name": "香农致敬",
@@ -473,6 +474,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_shannon_tribute,
+        "image": "隐藏成就/香农致敬.png",
     },
     "lucky_seven": {
         "name": "幸运七",
@@ -481,6 +483,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_lucky_seven,
+        "image": "隐藏成就/幸运七.png",
     },
     "all_rounder": {
         "name": "全能选手",
@@ -489,6 +492,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_all_rounder,
+        "image": "隐藏成就/全能选手.png",
     },
     "perfectionist_plus": {
         "name": "完美主义者+",
@@ -497,6 +501,7 @@ ACHIEVEMENTS: Dict[str, Dict[str, Any]] = {
         "category": CATEGORY_HIDDEN,
         "hidden": True,
         "check": _check_perfectionist_plus,
+        "image": "隐藏成就/完美主义者.png",
     },
 }
 

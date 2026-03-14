@@ -99,8 +99,11 @@ class CausalChainAnimation:
             if i > 0 and self._nodes[i - 1].alpha > 160:
                 self._draw_arrow(surface, self._nodes[i - 1], node)
 
-        if elapsed > 2.0:
-            tip = font.render("链路分析完成，准备发射...", True, (220, 220, 220))
+        if self.is_finished():
+            tip = font.render("分析完成，点击任意处继续发射", True, (220, 220, 220))
+            surface.blit(tip, (w // 2 - tip.get_width() // 2, h // 2 + 120))
+        elif elapsed > 2.0:
+            tip = font.render("链路分析中...", True, (220, 220, 220))
             surface.blit(tip, (w // 2 - tip.get_width() // 2, h // 2 + 120))
 
     def _draw_node(self, surface, node: ChainNode, label_font) -> None:
